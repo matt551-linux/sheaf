@@ -5,6 +5,7 @@ import {
   fitPageZoom,
   fitWidthZoom,
   layoutContinuous,
+  layoutTwoUp,
   nextZoom,
   totalHeight,
   visiblePages,
@@ -48,6 +49,16 @@ describe("continuous layout", () => {
     expect(visiblePages(l, 0, 500, 0)).toEqual([0]);
     expect(visiblePages(l, 0, 500, 1)).toEqual([0, 1]);
     expect(visiblePages(l, l[2].top + 10, 200, 1)).toEqual([1, 2, 3]);
+  });
+  it("lays out two-up rows", () => {
+    const l = layoutTwoUp([a4, a4, a4], 1);
+    expect(l).toHaveLength(3);
+    expect(l[0].top).toBe(l[1].top);
+    expect(l[0].left).toBeLessThan(0);
+    expect(l[1].left).toBeGreaterThan(0);
+    expect(l[2].top).toBe(l[0].top + l[0].height + 16);
+    expect(l[2].left).toBe(-l[2].width / 2);
+    expect(visiblePages(l, 0, 200, 0)).toEqual([0, 1]);
   });
   it("finds current page at viewport midpoint", () => {
     const l = layoutContinuous(pages, 1);

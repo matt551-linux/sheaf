@@ -18,6 +18,16 @@ fn engine() -> Engine {
     Engine::start(sheaf_lib::pdfium_dir()).expect("engine starts")
 }
 
+/// Decode a base64 PNG and sample the pixel at (x, y).
+fn pixel(png_b64: &str, x: u32, y: u32) -> [u8; 4] {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png_b64)
+        .unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().into_rgba8();
+    img.get_pixel(x, y).0
+}
+
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("sheaf-tests");
     std::fs::create_dir_all(&dir).unwrap();
@@ -230,6 +240,18 @@ fn annotation_crud_undo_redo_and_save_roundtrip() {
         annotated.png_base64.len(),
         blank_len,
         "annotations should change the raster"
+    );
+    // Highlight quad spans x 50..250 at PDF y 700..714 => raster y = 842-707 = 135.
+    let px = pixel(&annotated.png_base64, 150, 135);
+    assert!(
+        px[0] > 200 && px[1] > 200 && px[2] < 120,
+        "highlight should paint yellow, got {px:?}"
+    );
+    // Square stroke at left edge x=100, y from 600..660 => raster y ~ 212.
+    let edge = pixel(&annotated.png_base64, 100, 212);
+    assert!(
+        edge[0] > 150 && edge[1] < 100 && edge[2] < 100,
+        "square stroke should be red, got {edge:?}"
     );
 
     // Update

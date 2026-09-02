@@ -48,6 +48,8 @@ export function cssSize(page: PageSize, zoom: number): PageSize {
 export interface PageLayout extends PageSize {
   index: number;
   top: number;
+  /** Horizontal offset from the row center; 0 means centered (single column). */
+  left: number;
 }
 
 /** Vertical continuous layout: pages stacked, centered by the caller. */
@@ -55,10 +57,29 @@ export function layoutContinuous(pages: PageSize[], zoom: number, gap = 16): Pag
   let top = gap;
   return pages.map((p, index) => {
     const s = cssSize(p, zoom);
-    const l = { index, top, ...s };
+    const l = { index, top, left: -s.width / 2, ...s };
     top += s.height + gap;
     return l;
   });
+}
+
+/** Two pages per row (facing pages), rows stacked; `left` is relative to the row center. */
+export function layoutTwoUp(pages: PageSize[], zoom: number, gap = 16): PageLayout[] {
+  const out: PageLayout[] = [];
+  let top = gap;
+  for (let i = 0; i < pages.length; i += 2) {
+    const a = cssSize(pages[i], zoom);
+    const b = pages[i + 1] ? cssSize(pages[i + 1], zoom) : null;
+    const rowH = Math.max(a.height, b?.height ?? 0);
+    if (b) {
+      out.push({ index: i, top, left: -a.width - gap / 2, ...a });
+      out.push({ index: i + 1, top, left: gap / 2, ...b });
+    } else {
+      out.push({ index: i, top, left: -a.width / 2, ...a });
+    }
+    top += rowH + gap;
+  }
+  return out;
 }
 
 export function totalHeight(layout: PageLayout[], gap = 16): number {

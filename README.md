@@ -3,7 +3,7 @@
 An open-source, cross-platform PDF reader and editor with the goal of near feature parity
 with Adobe Acrobat and a straightforward user experience.
 
-Status: early. Milestone 0 (reader core) is working on Windows ARM64; see the roadmap below.
+Status: early. Milestones 0 to 2 (reader, annotate and comment) are working on Windows ARM64; see the roadmap below.
 
 ## Stack
 
@@ -45,8 +45,8 @@ pnpm check                                 # svelte-check / TypeScript
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | Open, render, continuous scroll, zoom, fit modes, rotate view, thumbnails, bookmarks, find, password prompt, drag and drop | working |
-| M1 | Text selection and copy, search highlighting, view modes, print, recent files, properties, attachments | next |
-| M2 | Annotate and comment: highlight, notes, ink, shapes, stamps, comments panel, undo/redo, incremental save | planned |
+| M1 | Text selection and copy, search hit highlighting, single/continuous/two-up, dark UI, night mode, recent files, properties, attachments, file association, print handoff | working |
+| M2 | Annotate and comment: highlight, underline, strikethrough, squiggly, sticky note, text box, pen, rectangle, ellipse, eraser, move, comments panel, note editor, undo/redo, save, save as, flatten | working |
 | M3 | Forms: fill, validate, prepare form editor, FDF/XFDF | planned |
 | M4 | Organize pages: reorder, rotate, delete, insert, split, merge, crop, headers/footers, Bates, watermark | planned |
 | M5 | Sign and protect: Fill and Sign, digital signatures (PAdES), password and permissions | planned |
@@ -58,5 +58,17 @@ Platform targets: Windows (x64, ARM64), macOS (universal), Linux (deb, rpm, AppI
 
 ## Keyboard shortcuts (so far)
 
-Ctrl+O open, Ctrl+F find, Ctrl+W close, Ctrl+plus/minus zoom, Ctrl+0 fit page, Ctrl+1 actual size,
-Ctrl+2 fit width, Ctrl+Shift+plus/minus rotate view, Ctrl+Shift+N go to page, PageUp/PageDown, Home/End.
+Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as, Ctrl+P print, Ctrl+D properties, Ctrl+F find, F3 / Shift+F3 next
+and previous hit, Ctrl+C copy selected text, Ctrl+Z / Ctrl+Y undo and redo, Ctrl+W close, Ctrl+plus/minus zoom,
+Ctrl+0 fit page, Ctrl+1 actual size, Ctrl+2 fit width, Ctrl+Shift+plus/minus rotate view, Ctrl+Shift+N go to page,
+PageUp/PageDown, Home/End, Delete removes the selected annotation, Escape returns to the Select tool.
+
+Tool keys: V select, H hand, U highlight, N note, T text box, P pen, R rectangle, E ellipse.
+
+## Developer notes
+
+- `scripts/cdp.py` evaluates JavaScript inside the running app when it is launched with
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` (Windows). `scripts/ui-scenario.js`
+  drives the annotation tools through real DOM events for on-screen verification.
+- Print currently exports the current state to a temp PDF and opens it with the system handler.
+  A native print dialog is planned.

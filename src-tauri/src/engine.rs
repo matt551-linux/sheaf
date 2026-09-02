@@ -575,7 +575,7 @@ impl EngineState {
     )> {
         let handle = unsafe { self.b.FPDF_LoadMemDocument64(&bytes, password) };
         if handle.is_null() {
-            let err = unsafe { self.b.FPDF_GetLastError() } as u32;
+            let err = unsafe { self.b.FPDF_GetLastError() };
             return Err(if err == FPDF_ERR_PASSWORD {
                 SheafError::PasswordRequired
             } else {
@@ -728,7 +728,7 @@ impl EngineState {
             file_size: d.bytes.len() as u64,
             pdf_version: version,
             encrypted,
-            permissions: unsafe { b.FPDF_GetDocPermissions(d.handle) } as u32,
+            permissions: unsafe { b.FPDF_GetDocPermissions(d.handle) },
             attachments,
             modified: d.modified,
             can_undo: !d.undo.is_empty(),
@@ -769,7 +769,7 @@ impl EngineState {
         for y in 0..h as usize {
             let row = unsafe { std::slice::from_raw_parts(buf.add(y * stride), (w * 4) as usize) };
             let out = &mut rgba[y * (w as usize) * 4..(y + 1) * (w as usize) * 4];
-            for (src, dst) in row.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
+            for (src, dst) in row.as_chunks::<4>().0.iter().zip(out.chunks_exact_mut(4)) {
                 dst[0] = src[2];
                 dst[1] = src[1];
                 dst[2] = src[0];
@@ -1163,8 +1163,13 @@ impl EngineState {
     fn apply_spec_colors(&self, a: FPDF_ANNOTATION, color: Option<Color>, interior: Option<Color>) {
         let b = &self.b;
         if color.is_some() || interior.is_some() {
-            // Drop any generated appearance so PDFium accepts the color change.
-            unsafe { b.FPDFAnnot_SetAP_str(a, FPDF_ANNOT_APPEARANCEMODE_NORMAL as i32, "") };
+            // Remove any generated appearance so PDFium accepts the color
+            // change and regenerates the appearance on next render. A null
+            // value deletes the AP entry; an empty string would leave an empty
+            // stream behind, which blocks regeneration.
+            unsafe {
+                b.FPDFAnnot_SetAP(a, FPDF_ANNOT_APPEARANCEMODE_NORMAL as i32, std::ptr::null())
+            };
         }
         if let Some(c) = color {
             unsafe { b.FPDFAnnot_SetStringValue_str(a, "SheafC", &fmt_color(c)) };
@@ -1384,7 +1389,7 @@ impl EngineState {
             }
             // For PDFium-generated kinds, drop the stale AP so it regenerates on render.
             _ => unsafe {
-                b.FPDFAnnot_SetAP_str(a, FPDF_ANNOT_APPEARANCEMODE_NORMAL as i32, "");
+                b.FPDFAnnot_SetAP(a, FPDF_ANNOT_APPEARANCEMODE_NORMAL as i32, std::ptr::null());
             },
         }
         let ann = self.read_annotation(page, a, index);

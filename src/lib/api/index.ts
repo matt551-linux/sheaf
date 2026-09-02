@@ -9,6 +9,12 @@ export interface PageInfo {
   rotation: number;
 }
 
+export interface AttachmentInfo {
+  index: number;
+  name: string;
+  size: number;
+}
+
 export interface DocumentInfo {
   id: number;
   path: string;
@@ -18,8 +24,19 @@ export interface DocumentInfo {
   title: string | null;
   author: string | null;
   subject: string | null;
+  keywords: string | null;
   creator: string | null;
   producer: string | null;
+  creation_date: string | null;
+  mod_date: string | null;
+  file_size: number;
+  pdf_version: string;
+  encrypted: boolean;
+  permissions: number;
+  attachments: AttachmentInfo[];
+  modified: boolean;
+  can_undo: boolean;
+  can_redo: boolean;
 }
 
 export interface RenderedPage {
@@ -49,21 +66,91 @@ export interface OutlineNode {
   children: OutlineNode[];
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface SearchHit {
   page_index: number;
   start: number;
   len: number;
   context: string;
+  rects: Rect[];
+}
+
+export type AnnotKind =
+  | "text"
+  | "freetext"
+  | "line"
+  | "square"
+  | "circle"
+  | "polygon"
+  | "polyline"
+  | "highlight"
+  | "underline"
+  | "squiggly"
+  | "strikeout"
+  | "stamp"
+  | "ink"
+  | "link"
+  | "widget"
+  | "popup"
+  | "fileattachment"
+  | "redact"
+  | "other";
+
+export interface Color {
+  r: number;
+  g: number;
+  b: number;
+}
+
+export interface Annotation {
+  page_index: number;
+  index: number;
+  kind: AnnotKind;
+  rect: Rect;
+  contents: string;
+  author: string;
+  subject: string;
+  modified: string;
+  color: Color | null;
+  interior_color: Color | null;
+  border_width: number;
+  quads: number[][];
+  ink: number[][][];
+  hidden: boolean;
+  editable: boolean;
+}
+
+export interface AnnotationSpec {
+  kind: AnnotKind;
+  rect: Rect;
+  contents?: string;
+  author?: string;
+  color?: Color | null;
+  interior_color?: Color | null;
+  border_width?: number;
+  quads?: number[][];
+  ink?: number[][][];
+  font_size?: number;
+}
+
+export interface AnnotationPatch {
+  rect?: Rect | null;
+  contents?: string | null;
+  author?: string | null;
+  color?: Color | null;
+  interior_color?: Color | null;
+  border_width?: number | null;
+  hidden?: boolean | null;
 }
 
 export interface SheafError {
-  kind:
-    | "engine"
-    | "pdf"
-    | "password_required"
-    | "no_such_document"
-    | "no_such_page"
-    | "io";
+  kind: "engine" | "pdf" | "password_required" | "no_such_document" | "no_such_page" | "io";
   message: string;
 }
 
@@ -71,14 +158,35 @@ export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
 
+export function errorMessage(e: unknown): string {
+  return isSheafError(e) ? e.message : e instanceof Error ? e.message : String(e);
+}
+
 export const api = {
+  launchFiles: () => invoke<string[]>("launch_files"),
   openDocument: (path: string, password?: string) =>
     invoke<DocumentInfo>("open_document", { path, password }),
+  documentInfo: (id: number) => invoke<DocumentInfo>("document_info", { id }),
   closeDocument: (id: number) => invoke<void>("close_document", { id }),
   renderPage: (id: number, page: number, scale: number, rotation = 0) =>
     invoke<RenderedPage>("render_page", { id, page, scale, rotation }),
   pageText: (id: number, page: number) => invoke<PageText>("page_text", { id, page }),
   outline: (id: number) => invoke<OutlineNode[]>("document_outline", { id }),
-  search: (id: number, query: string, caseSensitive = false) =>
-    invoke<SearchHit[]>("search_document", { id, query, caseSensitive }),
+  search: (id: number, query: string, caseSensitive = false, wholeWord = false) =>
+    invoke<SearchHit[]>("search_document", { id, query, caseSensitive, wholeWord }),
+  saveAttachment: (id: number, index: number, path: string) =>
+    invoke<void>("save_attachment", { id, index, path }),
+  listAnnotations: (id: number, page: number) =>
+    invoke<Annotation[]>("list_annotations", { id, page }),
+  addAnnotation: (id: number, page: number, spec: AnnotationSpec) =>
+    invoke<Annotation>("add_annotation", { id, page, spec }),
+  updateAnnotation: (id: number, page: number, index: number, patch: AnnotationPatch) =>
+    invoke<Annotation>("update_annotation", { id, page, index, patch }),
+  deleteAnnotation: (id: number, page: number, index: number) =>
+    invoke<void>("delete_annotation", { id, page, index }),
+  undo: (id: number) => invoke<DocumentInfo>("undo", { id }),
+  redo: (id: number) => invoke<DocumentInfo>("redo", { id }),
+  saveDocument: (id: number, path: string | null, flatten = false) =>
+    invoke<DocumentInfo>("save_document", { id, options: { path, flatten } }),
+  exportForPrint: (id: number) => invoke<string>("export_for_print", { id }),
 };

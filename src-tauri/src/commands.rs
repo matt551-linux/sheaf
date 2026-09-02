@@ -8,6 +8,15 @@ use crate::engine::{
 };
 use crate::error::Result;
 
+/// PDF paths passed on the command line (file association / "Open with").
+#[tauri::command]
+pub fn launch_files() -> Vec<String> {
+    std::env::args()
+        .skip(1)
+        .filter(|a| a.to_lowercase().ends_with(".pdf") && std::path::Path::new(a).exists())
+        .collect()
+}
+
 #[tauri::command]
 pub fn open_document(
     engine: State<'_, Engine>,
