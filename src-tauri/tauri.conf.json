@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Sheaf",
+  "version": "0.1.0",
+  "identifier": "org.sheafpdf.sheaf",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Sheaf",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 480,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Open-source PDF reader and editor",
+    "longDescription": "Sheaf is an open-source, cross-platform PDF reader and editor aiming for feature parity with Adobe Acrobat.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "mimeType": "application/pdf",
+        "description": "PDF document",
+        "role": "Editor"
+      }
+    ]
+  }
+}
