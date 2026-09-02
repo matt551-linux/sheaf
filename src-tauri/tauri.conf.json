@@ -28,6 +28,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "resources": ["resources/*"],
     "shortDescription": "Open-source PDF reader and editor",
     "longDescription": "Sheaf is an open-source, cross-platform PDF reader and editor aiming for feature parity with Adobe Acrobat.",
     "icon": [

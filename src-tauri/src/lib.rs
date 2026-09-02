@@ -54,6 +54,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(engine)
         .setup(|app| {
             #[cfg(debug_assertions)]
@@ -64,11 +66,21 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_document,
+            commands::document_info,
             commands::close_document,
             commands::render_page,
             commands::page_text,
             commands::document_outline,
             commands::search_document,
+            commands::save_attachment,
+            commands::list_annotations,
+            commands::add_annotation,
+            commands::update_annotation,
+            commands::delete_annotation,
+            commands::undo,
+            commands::redo,
+            commands::save_document,
+            commands::export_for_print,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

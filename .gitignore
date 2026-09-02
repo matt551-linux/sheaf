@@ -11,5 +11,6 @@ vite.config.ts.timestamp-*
 
 # PDFium prebuilt binaries (fetched by scripts/fetch-pdfium.mjs)
 src-tauri/pdfium/
-src-tauri/resources/
+src-tauri/resources/*
+!src-tauri/resources/.gitkeep
 .hermes/
