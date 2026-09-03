@@ -67,6 +67,17 @@ def main():
         except (socket.timeout, EOFError):
             pass
         return
+    if sys.argv[1:2] == ["--screenshot"]:
+        # Optional: an expression to run first (e.g. open a menu), then capture.
+        if sys.argv[2:3]:
+            call("Runtime.evaluate", expression=sys.argv[2], awaitPromise=True, returnByValue=True)
+            time.sleep(0.2)
+        r = call("Page.captureScreenshot", format="png")
+        out = sys.argv[3] if sys.argv[3:4] else os.path.join(os.environ.get("TEMP", "."), "sheaf-cdp-shot.png")
+        with open(out, "wb") as f:
+            f.write(base64.b64decode(r["result"]["data"]))
+        print(out)
+        return
     expr = sys.argv[1]
     r = call("Runtime.evaluate", expression=expr, awaitPromise=True, returnByValue=True)
     print(json.dumps(r.get("result", r), indent=1)[:4000])
