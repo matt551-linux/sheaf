@@ -139,8 +139,8 @@
         {@const btnH = Math.min(r.h, CONTROL_H * zoom)}
         <!-- PDFium paints the original full-height list into the page bitmap;
              cover the whole widget rect so it doesn't show behind the compact
-             dropdown. -->
-        <div class="absolute bg-white" style="left:{r.x - 2}px;top:{r.y - 2}px;width:{r.w + 4}px;height:{r.h + 4}px" aria-hidden="true"></div>
+             dropdown. Night mode inverts the page image, so match its paper. -->
+        <div class="absolute {docStore.nightMode ? 'bg-black' : 'bg-white'}" style="left:{r.x - 2}px;top:{r.y - 2}px;width:{r.w + 4}px;height:{r.h + 4}px" aria-hidden="true"></div>
         {#if f.multiselect}
           <div data-listbox-popup class="absolute" style="left:{r.x}px;top:{r.y}px;width:{r.w}px">
             <button
