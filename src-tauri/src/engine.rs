@@ -28,6 +28,7 @@ const FPDF_ERR_PASSWORD: u32 = 4;
 const FPDF_ANNOT: u32 = 1;
 const FPDF_LCD_TEXT: u32 = 2;
 const FPDFBitmap_BGRA: u32 = 4;
+const FPDF_INCREMENTAL: u32 = 1;
 const FPDF_NO_INCREMENTAL: u32 = 2;
 const FLAT_NORMALDISPLAY: u32 = 0;
 const FPDF_ANNOT_TEXT: u32 = 1;
@@ -392,6 +393,12 @@ enum Request {
     ExtractPages(DocId, Vec<u16>, PathBuf, Sender<Result<()>>),
     CropPages(DocId, Vec<u16>, [f32; 4], Sender<Result<DocumentInfo>>),
     StampPages(DocId, StampSpec, Sender<Result<DocumentInfo>>),
+    // M5: security. These run on the engine thread because they replace the
+    // live document bytes (and must go through undo/reload).
+    SignDocument(DocId, PathBuf, crate::security::SignSpec, Sender<Result<DocumentInfo>>),
+    ListSignatures(DocId, Sender<Result<Vec<crate::security::SignatureInfo>>>),
+    Protect(DocId, crate::security::SecuritySpec, Sender<Result<DocumentInfo>>),
+    Unprotect(DocId, Sender<Result<DocumentInfo>>),
 }
 
 #[derive(Clone)]
@@ -564,6 +571,23 @@ impl Engine {
     pub fn stamp_pages(&self, id: DocId, spec: StampSpec) -> Result<DocumentInfo> {
         self.call(|r| Request::StampPages(id, spec, r))
     }
+    pub fn sign_document(
+        &self,
+        id: DocId,
+        identities_dir: PathBuf,
+        spec: crate::security::SignSpec,
+    ) -> Result<DocumentInfo> {
+        self.call(|r| Request::SignDocument(id, identities_dir, spec, r))
+    }
+    pub fn list_signatures(&self, id: DocId) -> Result<Vec<crate::security::SignatureInfo>> {
+        self.call(|r| Request::ListSignatures(id, r))
+    }
+    pub fn protect(&self, id: DocId, spec: crate::security::SecuritySpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::Protect(id, spec, r))
+    }
+    pub fn unprotect(&self, id: DocId) -> Result<DocumentInfo> {
+        self.call(|r| Request::Unprotect(id, r))
+    }
 }
 
 fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindings>> {
@@ -593,6 +617,10 @@ struct OpenDoc {
     undo: Vec<Vec<u8>>,
     redo: Vec<Vec<u8>>,
     modified: bool,
+    /// True while `bytes` exactly equals PDFium's state (right after open,
+    /// reload, sign, protect). PDFium-level edits clear it. When set, we
+    /// serialize by copying `bytes`, which keeps signatures byte-identical.
+    authoritative: bool,
 }
 
 struct EngineState {
@@ -682,7 +710,7 @@ impl EngineState {
             Request::SaveCopy(id, p, r) => {
                 let _ = r.send((|| {
                     let d = self.doc(id)?;
-                    let bytes = self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?;
+                    let bytes = self.serialize(d)?;
                     std::fs::write(p, bytes)?;
                     Ok(())
                 })());
@@ -716,6 +744,18 @@ impl EngineState {
             }
             Request::CropPages(id, pages, bx, r) => {
                 let _ = r.send(self.crop_pages(id, &pages, bx));
+            }
+            Request::SignDocument(id, dir, spec, r) => {
+                let _ = r.send(self.sign_document(id, dir, &spec));
+            }
+            Request::ListSignatures(id, r) => {
+                let _ = r.send(self.list_signatures(id));
+            }
+            Request::Protect(id, spec, r) => {
+                let _ = r.send(self.protect(id, &spec));
+            }
+            Request::Unprotect(id, r) => {
+                let _ = r.send(self.unprotect(id));
             }
             Request::StampPages(id, spec, r) => {
                 let _ = r.send(self.stamp_pages(id, &spec));
@@ -791,6 +831,7 @@ impl EngineState {
                 undo: Vec::new(),
                 redo: Vec::new(),
                 modified: false,
+                authoritative: true,
             },
         );
         self.info(id)
@@ -1263,11 +1304,27 @@ impl EngineState {
         Ok(w.buf)
     }
 
+    /// Bytes for the document as it stands. Verbatim when nothing changed in
+    /// PDFium; otherwise an incremental update for signed documents (so the
+    /// existing signatures keep covering their byte ranges) or a compact
+    /// rewrite for everything else.
+    fn serialize(&self, d: &OpenDoc) -> Result<Vec<u8>> {
+        if d.authoritative {
+            return Ok(d.bytes.clone());
+        }
+        let flags = if has_signatures(&d.bytes) {
+            FPDF_INCREMENTAL
+        } else {
+            FPDF_NO_INCREMENTAL
+        };
+        self.snapshot(d.handle, flags)
+    }
+
     /// Push the current state to the undo stack before a mutation.
     fn checkpoint(&mut self, id: DocId) -> Result<()> {
         let snap = {
             let d = self.doc(id)?;
-            self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?
+            self.serialize(d)?
         };
         let d = self.doc_mut(id)?;
         d.undo.push(snap);
@@ -1276,6 +1333,7 @@ impl EngineState {
         }
         d.redo.clear();
         d.modified = true;
+        d.authoritative = false;
         Ok(())
     }
 
@@ -1301,6 +1359,7 @@ impl EngineState {
                 undo,
                 redo,
                 modified,
+                authoritative: true,
             },
         );
         self.free(old);
@@ -1310,7 +1369,7 @@ impl EngineState {
     fn undo_redo(&mut self, id: DocId, undo: bool) -> Result<DocumentInfo> {
         let current = {
             let d = self.doc(id)?;
-            self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?
+            self.serialize(d)?
         };
         let target = {
             let d = self.doc_mut(id)?;
@@ -2176,6 +2235,71 @@ impl EngineState {
 
     // ----- save -----
 
+
+    // ----- M5 security -----
+
+    /// Current on-disk-equivalent bytes: unsaved PDFium edits are serialized
+    /// first so the signature covers what the user sees. Signing an
+    /// unmodified document uses the original bytes so earlier signatures
+    /// remain byte-for-byte intact.
+    fn current_bytes(&self, id: DocId) -> Result<Vec<u8>> {
+        let d = self.doc(id)?;
+        self.serialize(d)
+    }
+
+    fn sign_document(
+        &mut self,
+        id: DocId,
+        identities_dir: PathBuf,
+        spec: &crate::security::SignSpec,
+    ) -> Result<DocumentInfo> {
+        let bytes = self.current_bytes(id)?;
+        let password = self.doc(id)?.password.clone();
+        let store = crate::security::IdentityStore::new(identities_dir);
+        let signed = crate::security::sign(&bytes, password.as_deref(), &store, spec)?;
+        self.checkpoint(id)?;
+        self.reload(id, signed)?;
+        self.info(id)
+    }
+
+    fn list_signatures(&self, id: DocId) -> Result<Vec<crate::security::SignatureInfo>> {
+        let d = self.doc(id)?;
+        // Verify against the bytes as PDFium holds them (what was opened or
+        // last saved/signed); unsaved annotation edits are not on disk yet.
+        crate::security::list_signatures(&d.bytes, d.password.as_deref())
+    }
+
+    fn protect(&mut self, id: DocId, spec: &crate::security::SecuritySpec) -> Result<DocumentInfo> {
+        let bytes = self.current_bytes(id)?;
+        let password = self.doc(id)?.password.clone();
+        let out = crate::security::protect(&bytes, password.as_deref(), spec)?;
+        self.checkpoint(id)?;
+        // The new file opens with the user password (or none). Switch the
+        // stored password so reload/undo/save keep working.
+        let open_pw = if spec.user_password.is_empty() {
+            if spec.owner_password.is_empty() {
+                None
+            } else {
+                Some(spec.owner_password.clone())
+            }
+        } else {
+            Some(spec.user_password.clone())
+        };
+        self.doc_mut(id)?.password = open_pw;
+        self.reload(id, out)?;
+        self.info(id)
+    }
+
+    fn unprotect(&mut self, id: DocId) -> Result<DocumentInfo> {
+        let bytes = self.current_bytes(id)?;
+        let password = self.doc(id)?.password.clone();
+        let out = crate::security::unprotect(&bytes, password.as_deref())?;
+        self.checkpoint(id)?;
+        self.doc_mut(id)?.password = None;
+        self.reload(id, out)?;
+        self.info(id)
+    }
+
     fn save(&mut self, id: DocId, opts: SaveOptions) -> Result<DocumentInfo> {
         let target = match &opts.path {
             Some(p) => PathBuf::from(p),
@@ -2190,8 +2314,10 @@ impl EngineState {
                     let p = self.page(d, i)?;
                     unsafe { b.FPDFPage_Flatten(p.page, FLAT_NORMALDISPLAY as i32) };
                 }
+                self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?
+            } else {
+                self.serialize(d)?
             }
-            self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?
         };
         let tmp = target.with_extension("pdf.sheaf-tmp");
         std::fs::write(&tmp, &bytes)?;
@@ -2214,6 +2340,11 @@ impl EngineState {
 }
 
 // ---------- helpers ----------
+
+/// Cheap structural probe: a signed PDF carries a /ByteRange in a /Sig dict.
+fn has_signatures(bytes: &[u8]) -> bool {
+    bytes.windows(10).any(|w| w == b"/ByteRange")
+}
 
 fn utf16_to_string(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());

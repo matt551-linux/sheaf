@@ -95,6 +95,13 @@
       /* synthetic or already-released pointer */
     }
 
+    // Signature placement overrides the current tool: any drag draws the box.
+    if (docStore.placingSignature) {
+      drag = { x, y, cx: x, cy: y };
+      e.preventDefault();
+      return;
+    }
+
     // Selecting / moving an existing annotation with the select tool.
     if (tool === "select" || tool === "eraser") {
       const hit = [...annotBoxes].reverse().find(({ r }) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
@@ -186,6 +193,14 @@
     if (!drag) return;
     const d = drag;
     drag = null;
+
+    if (docStore.placingSignature) {
+      const r = normRect(d.x, d.y, d.cx, d.cy);
+      const cb = docStore.placingSignature;
+      docStore.placingSignature = null;
+      if (r.w >= 8 && r.h >= 8) cb(index, rectToPdf(r, size, zoom, rot));
+      return;
+    }
 
     if (tool === "ink") {
       const path = inkPath;
@@ -279,9 +294,9 @@
   }
 
   const cursor = $derived(
-    tool === "hand" ? "grab" : tool === "select" || isMarkup(tool) ? "text" : tool === "eraser" ? "not-allowed" : "crosshair",
+    docStore.placingSignature ? "crosshair" : tool === "hand" ? "grab" : tool === "select" || isMarkup(tool) ? "text" : tool === "eraser" ? "not-allowed" : "crosshair",
   );
-  const dragRect = $derived(drag && (isShape(tool) || tool === "freetext") ? normRect(drag.x, drag.y, drag.cx, drag.cy) : null);
+  const dragRect = $derived(drag && (isShape(tool) || tool === "freetext" || docStore.placingSignature) ? normRect(drag.x, drag.y, drag.cx, drag.cy) : null);
   const inkPx = (p: number[][]) => p.map(([x, y]) => `${x},${y}`).join(" ");
   const strokeCss = $derived(colorToCss(docStore.styles.ink.color));
   const strokeW = $derived(docStore.styles.ink.width * ((zoom * 96) / 72));

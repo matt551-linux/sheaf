@@ -1,6 +1,7 @@
 mod commands;
 pub mod engine;
 mod error;
+pub mod security;
 
 use std::path::PathBuf;
 
@@ -18,8 +19,24 @@ pub fn pdfium_dir() -> Option<PathBuf> {
     let lib_name = pdfium_render::prelude::Pdfium::pdfium_platform_library_name();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            if dir.join(&lib_name).exists() {
-                return Some(dir.to_path_buf());
+            // Bundles ship the library as a Tauri resource. Where that lands:
+            //   Windows (msi/nsis):  <exe dir>/resources/
+            //   Linux (deb/rpm):     /usr/lib/<app>/resources/ (exe in /usr/bin)
+            //   Linux (AppImage):    <exe dir>/../lib/<app>/resources/
+            //   macOS:               <App>.app/Contents/Resources/resources/
+            let candidates = [
+                dir.to_path_buf(),
+                dir.join("resources"),
+                dir.join("..").join("Resources").join("resources"),
+                dir.join("..").join("lib").join("sheaf").join("resources"),
+                dir.join("..").join("lib").join("Sheaf").join("resources"),
+                PathBuf::from("/usr/lib/sheaf/resources"),
+                PathBuf::from("/usr/lib/Sheaf/resources"),
+            ];
+            for c in candidates {
+                if c.join(&lib_name).exists() {
+                    return Some(c);
+                }
             }
         }
     }
@@ -94,6 +111,14 @@ pub fn run() {
             commands::extract_pages,
             commands::crop_pages,
             commands::stamp_pages,
+            commands::list_identities,
+            commands::create_identity,
+            commands::import_identity,
+            commands::delete_identity,
+            commands::sign_document,
+            commands::list_signatures,
+            commands::protect_document,
+            commands::unprotect_document,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

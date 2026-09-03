@@ -28,6 +28,15 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 thiserror = "2"
 parking_lot = "0.12"
 base64 = "0.22"
+# M5 sign and protect (pure Rust; no clang/ring needed)
+lopdf = "0.44"
+pdf_oxide = { version = "0.3.77", default-features = false, features = ["signatures"] }
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+x509-cert = { version = "0.2", features = ["builder", "pem"] }
+x509-parser = "0.16"
+p12-keystore = "0.3"
+sha2 = "0.10"
+rand = "0.8"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

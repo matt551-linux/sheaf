@@ -3,7 +3,7 @@
 An open-source, cross-platform PDF reader and editor with the goal of near feature parity
 with Adobe Acrobat and a straightforward user experience.
 
-Status: early. Milestones 0 to 3 (reader, annotate and comment, forms) are working on Windows ARM64; see the roadmap below.
+Status: early. Milestones 0 to 5 (reader, annotate and comment, forms, organize pages, sign and protect) are working; CI builds installers for Windows, macOS, and Linux. See the roadmap below.
 
 ## Stack
 
@@ -48,11 +48,11 @@ pnpm check                                 # svelte-check / TypeScript
 | M1 | Text selection and copy, search hit highlighting, single/continuous/two-up, dark UI, night mode, recent files, properties, attachments, file association, print handoff | working |
 | M2 | Annotate and comment: highlight, underline, strikethrough, squiggly, sticky note, text box, pen, rectangle, ellipse, eraser, move, comments panel, note editor, undo/redo, save, save as, flatten | working |
 | M3 | Forms: fill (text, checkbox, radio, combo, listbox), required-field validation, XFDF export/import | working |
-| M4 | Organize pages: reorder, rotate, delete, insert, split, merge, crop, headers/footers, Bates, watermark | planned |
-| M5 | Sign and protect: Fill and Sign, digital signatures (PAdES), password and permissions | planned |
+| M4 | Organize pages: reorder, rotate, delete, insert, extract, crop, headers/footers, Bates, watermark | working |
+| M5 | Sign and protect: self-signed or imported (.p12) digital IDs, visible signatures, verification, DocMDP lock, AES-256 password and permissions | working |
 | M6 | Edit: text and image editing, links, create PDF from images/Office/HTML, export to images/text/DOCX/PDF-A | planned |
 | M7 | Redact, Compare, OCR, Accessibility tools | planned |
-| M8 | Installers for all platforms, auto-update, localization, plugin API | planned |
+| M8 | Installers for all platforms (CI artifacts today), auto-update, localization, plugin API | in progress |
 
 Platform targets: Windows (x64, ARM64), macOS (universal), Linux (deb, rpm, AppImage, AUR).
 

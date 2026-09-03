@@ -36,6 +36,10 @@ fn scratch(name: &str) -> PathBuf {
     p
 }
 
+fn spec_annot(kind: AnnotKind, rect: Rect) -> AnnotationSpec {
+    spec(kind, rect)
+}
+
 fn spec(kind: AnnotKind, rect: Rect) -> AnnotationSpec {
     AnnotationSpec {
         kind,
@@ -620,4 +624,106 @@ fn stamping_headers_bates_watermark() {
     assert!(!t.text.contains("CONFIDENTIAL"), "watermark undone");
 
     e.close(info.id).unwrap();
+}
+
+// ---------- M5: sign and protect through the engine ----------
+
+#[test]
+fn m5_sign_save_reopen_annotate_keeps_signature() {
+    use sheaf_lib::security::{IdentityStore, SecuritySpec, SignSpec};
+    let e = engine();
+    let ids = std::env::temp_dir().join(format!("sheaf-engine-ids-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ids);
+    let idn = IdentityStore::new(ids.clone())
+        .create_self_signed("Engine Signer", Some("Sheaf"), "")
+        .unwrap();
+
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+    assert!(e.list_signatures(id).unwrap().is_empty());
+
+    // Sign with a visible appearance on page 1.
+    let spec = SignSpec {
+        identity_id: idn.id.clone(),
+        password: String::new(),
+        page: 0,
+        rect: [72.0, 72.0, 300.0, 140.0],
+        reason: Some("Engine test".into()),
+        location: None,
+        contact: None,
+        name: None,
+        lock: false,
+    };
+    let info = e.sign_document(id, ids.clone(), spec).unwrap();
+    assert!(info.modified && info.can_undo);
+    let sigs = e.list_signatures(id).unwrap();
+    assert_eq!(sigs.len(), 1);
+    assert_eq!(sigs[0].status, "valid", "{:?}", sigs[0]);
+
+    // The appearance renders: sample the tinted box.
+    let png = e.render(id, 0, 1.0, 0).unwrap();
+    let px = pixel(&png.png_base64, 100, (png.height_px as f32 - 100.0) as u32);
+    assert!(px[2] > px[0], "expected the bluish signature tint, got {px:?}");
+
+    // Save, reopen, still valid.
+    let out = scratch("m5-signed.pdf");
+    e.save(id, SaveOptions { path: Some(out.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    e.close(id).unwrap();
+    let info = e.open(out.clone(), None).unwrap();
+    let id = info.id;
+    let sigs = e.list_signatures(id).unwrap();
+    assert_eq!(sigs.len(), 1);
+    assert_eq!(sigs[0].status, "valid", "{:?}", sigs[0]);
+    assert!(sigs[0].covers_whole_document);
+
+    // Annotate after signing and save: the signature must stay valid but no
+    // longer cover the whole file (incremental update).
+    e.add_annotation(id, 0, spec_annot(AnnotKind::Square, Rect { x: 10.0, y: 10.0, w: 50.0, h: 50.0 })).unwrap();
+    let out2 = scratch("m5-signed-annotated.pdf");
+    e.save(id, SaveOptions { path: Some(out2.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    let sigs = e.list_signatures(id).unwrap();
+    assert_eq!(sigs.len(), 1);
+    assert_eq!(sigs[0].status, "modified", "{:?}", sigs[0]);
+    assert!(!sigs[0].covers_whole_document);
+    let bytes = std::fs::read(&out2).unwrap();
+    let signed = std::fs::read(&out).unwrap();
+    assert_eq!(&bytes[..signed.len()], &signed[..], "save after signing must be incremental");
+    e.close(id).unwrap();
+
+    // Protect: reopen requires the password; permissions are recorded.
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+    let spec = SecuritySpec {
+        user_password: "pw".into(),
+        owner_password: "own".into(),
+        allow_print: false,
+        allow_print_high_quality: false,
+        allow_modify: false,
+        allow_copy: false,
+        allow_annotate: true,
+        allow_fill_forms: true,
+        allow_assemble: false,
+        allow_accessibility: true,
+    };
+    let info = e.protect(id, spec).unwrap();
+    assert!(info.encrypted, "{info:?}");
+    assert_eq!(info.permissions & 0b100, 0, "print bit should be clear");
+    let out3 = scratch("m5-protected.pdf");
+    e.save(id, SaveOptions { path: Some(out3.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    e.close(id).unwrap();
+    let err = e.open(out3.clone(), None).unwrap_err();
+    assert!(err.to_string().contains("password"), "{err}");
+    let info = e.open(out3.clone(), Some("pw".into())).unwrap();
+    assert!(info.encrypted);
+    assert_eq!(info.page_count, 1);
+    // Remove security, save, reopen without password.
+    let info = e.unprotect(info.id).unwrap();
+    assert!(!info.encrypted);
+    let out4 = scratch("m5-unprotected.pdf");
+    e.save(info.id, SaveOptions { path: Some(out4.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    e.close(info.id).unwrap();
+    let info = e.open(out4, None).unwrap();
+    assert!(!info.encrypted);
+    e.close(info.id).unwrap();
+    let _ = std::fs::remove_dir_all(&ids);
 }

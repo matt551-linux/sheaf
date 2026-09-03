@@ -197,6 +197,62 @@ export interface FormField {
   options: FormFieldOption[];
 }
 
+// ---------- M5: sign and protect ----------
+
+export interface Identity {
+  id: string;
+  subject: string;
+  issuer: string;
+  self_signed: boolean;
+  not_after: string;
+  path: string;
+}
+
+export interface SignSpec {
+  identity_id: string;
+  password: string;
+  page: number;
+  /** [x1, y1, x2, y2] in PDF points; zero-area for an invisible signature. */
+  rect: [number, number, number, number];
+  reason?: string | null;
+  location?: string | null;
+  contact?: string | null;
+  name?: string | null;
+  lock: boolean;
+}
+
+export type SignatureStatus = "valid" | "modified" | "invalid" | "unknown";
+
+export interface SignatureInfo {
+  field_name: string;
+  signer: string;
+  subject: string;
+  issuer: string;
+  self_signed: boolean;
+  signed_at: string | null;
+  reason: string | null;
+  location: string | null;
+  page: number | null;
+  rect: [number, number, number, number] | null;
+  status: SignatureStatus;
+  covers_whole_document: boolean;
+  locks_document: boolean;
+  messages: string[];
+}
+
+export interface SecuritySpec {
+  user_password: string;
+  owner_password: string;
+  allow_print: boolean;
+  allow_print_high_quality: boolean;
+  allow_modify: boolean;
+  allow_copy: boolean;
+  allow_annotate: boolean;
+  allow_fill_forms: boolean;
+  allow_assemble: boolean;
+  allow_accessibility: boolean;
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -250,4 +306,15 @@ export const api = {
   cropPages: (id: number, pages: number[], cropBox: [number, number, number, number]) =>
     invoke<DocumentInfo>("crop_pages", { id, pages, cropBox }),
   stampPages: (id: number, spec: StampSpec) => invoke<DocumentInfo>("stamp_pages", { id, spec }),
+  listIdentities: () => invoke<Identity[]>("list_identities"),
+  createIdentity: (commonName: string, organization: string | null, password: string) =>
+    invoke<Identity>("create_identity", { commonName, organization, password }),
+  importIdentity: (path: string, filePassword: string, password: string) =>
+    invoke<Identity>("import_identity", { path, filePassword, password }),
+  deleteIdentity: (id: string) => invoke<void>("delete_identity", { id }),
+  signDocument: (id: number, spec: SignSpec) => invoke<DocumentInfo>("sign_document", { id, spec }),
+  listSignatures: (id: number) => invoke<SignatureInfo[]>("list_signatures", { id }),
+  protectDocument: (id: number, spec: SecuritySpec) =>
+    invoke<DocumentInfo>("protect_document", { id, spec }),
+  unprotectDocument: (id: number) => invoke<DocumentInfo>("unprotect_document", { id }),
 };

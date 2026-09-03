@@ -12,7 +12,9 @@ import {
   type FormField,
   type OutlineNode,
   type PageText,
+  type Rect,
   type SearchHit,
+  type SignatureInfo,
 } from "$lib/api";
 import {
   clampZoom,
@@ -112,6 +114,11 @@ class DocumentStore {
   formFields = $state<Record<number, FormField[]>>({});
   /** Show interactive form field overlays. */
   formMode = $state(true);
+
+  /** Digital signatures found in the open document (refreshed on open/sign/save). */
+  signatures = $state<SignatureInfo[]>([]);
+  /** While set, the next drag on a page places a signature there. */
+  placingSignature = $state<((page: number, rect: Rect) => void) | null>(null);
 
   searchQuery = $state("");
   searchHits = $state<SearchHit[]>([]);
@@ -224,6 +231,7 @@ class DocumentStore {
       this.resetView();
       const doc = await api.openDocument(path, password);
       this.doc = doc;
+      void this.refreshSignatures(doc.id);
       this.passwordPrompt = null;
       this.applyFit();
       this.outline = await api.outline(doc.id).catch(() => []);
@@ -243,6 +251,7 @@ class DocumentStore {
   async close() {
     if (this.doc) await api.closeDocument(this.doc.id).catch(() => {});
     this.doc = null;
+    this.signatures = [];
     this.resetView();
   }
 
@@ -480,6 +489,16 @@ class DocumentStore {
   }
   /** Adopt new document info after a structural change (pages added,
    * removed, moved, rotated, cropped, stamped): all caches are stale. */
+  async refreshSignatures(id = this.doc?.id) {
+    if (id == null) return;
+    try {
+      const sigs = await api.listSignatures(id);
+      if (this.doc?.id === id) this.signatures = sigs;
+    } catch {
+      this.signatures = [];
+    }
+  }
+
   applyStructure(info: DocumentInfo) {
     this.doc = info;
     this.selected = null;
@@ -502,6 +521,7 @@ class DocumentStore {
     try {
       const info = await api.saveDocument(this.doc.id, path, flatten);
       this.doc = info;
+      void this.refreshSignatures(info.id);
       if (flatten) {
         this.annots = {};
         this.invalidateRenders();

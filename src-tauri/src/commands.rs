@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::engine::{
     Annotation, AnnotationPatch, AnnotationSpec, DocumentInfo, Engine, FormField, OutlineNode,
     PageText, RenderedPage, SaveOptions, SearchHit, StampSpec,
 };
 use crate::error::Result;
+use crate::security::{Identity, IdentityStore, SecuritySpec, SignSpec, SignatureInfo};
 
 /// PDF paths passed on the command line (file association / "Open with").
 #[tauri::command]
@@ -256,4 +257,81 @@ pub async fn stamp_pages(
     spec: StampSpec,
 ) -> Result<DocumentInfo> {
     engine.stamp_pages(id, spec)
+}
+
+// ---------- M5: sign and protect ----------
+
+fn identities_dir(app: &AppHandle) -> Result<std::path::PathBuf> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::error::SheafError::Engine(format!("app data dir: {e}")))?;
+    Ok(base.join("identities"))
+}
+
+#[tauri::command]
+pub async fn list_identities(app: AppHandle) -> Result<Vec<Identity>> {
+    IdentityStore::new(identities_dir(&app)?).list()
+}
+
+#[tauri::command]
+pub async fn create_identity(
+    app: AppHandle,
+    common_name: String,
+    organization: Option<String>,
+    password: String,
+) -> Result<Identity> {
+    IdentityStore::new(identities_dir(&app)?).create_self_signed(
+        &common_name,
+        organization.as_deref(),
+        &password,
+    )
+}
+
+#[tauri::command]
+pub async fn import_identity(
+    app: AppHandle,
+    path: String,
+    file_password: String,
+    password: String,
+) -> Result<Identity> {
+    IdentityStore::new(identities_dir(&app)?).import_pkcs12(
+        std::path::Path::new(&path),
+        &file_password,
+        &password,
+    )
+}
+
+#[tauri::command]
+pub async fn delete_identity(app: AppHandle, id: String) -> Result<()> {
+    IdentityStore::new(identities_dir(&app)?).delete(&id)
+}
+
+#[tauri::command]
+pub async fn sign_document(
+    app: AppHandle,
+    engine: State<'_, Engine>,
+    id: u32,
+    spec: SignSpec,
+) -> Result<DocumentInfo> {
+    engine.sign_document(id, identities_dir(&app)?, spec)
+}
+
+#[tauri::command]
+pub async fn list_signatures(engine: State<'_, Engine>, id: u32) -> Result<Vec<SignatureInfo>> {
+    engine.list_signatures(id)
+}
+
+#[tauri::command]
+pub async fn protect_document(
+    engine: State<'_, Engine>,
+    id: u32,
+    spec: SecuritySpec,
+) -> Result<DocumentInfo> {
+    engine.protect(id, spec)
+}
+
+#[tauri::command]
+pub async fn unprotect_document(engine: State<'_, Engine>, id: u32) -> Result<DocumentInfo> {
+    engine.unprotect(id)
 }

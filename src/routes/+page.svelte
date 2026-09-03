@@ -10,6 +10,7 @@
   import PageCanvas from "$lib/components/PageCanvas.svelte";
   import NoteEditor from "$lib/components/NoteEditor.svelte";
   import OrganizeDialog from "$lib/components/OrganizeDialog.svelte";
+  import SecurityPanel from "$lib/components/SecurityPanel.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import { api, type Annotation } from "$lib/api";
@@ -20,6 +21,7 @@
   let noteTarget = $state<Annotation | null>(null);
   let showProps = $state(false);
   let showOrganize = $state(false);
+  let securityTab = $state<"sign" | "signatures" | "protect" | null>(null);
 
   function goToPage(i: number) {
     canvas?.scrollToPage(i);
@@ -231,6 +233,9 @@
   });
 
   $effect(() => {
+    if (!docStore.doc) securityTab = null;
+  });
+  $effect(() => {
     const title = docStore.doc ? `${docStore.doc.modified ? "* " : ""}${docStore.doc.file_name} - Sheaf` : "Sheaf";
     getCurrentWindow().setTitle(title).catch(() => {});
   });
@@ -239,7 +244,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => (securityTab = t)} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
@@ -309,5 +314,8 @@
         </div>
       {/if}
     </div>
+    {#if securityTab && docStore.doc}
+      <SecurityPanel initialTab={securityTab} onClose={() => (securityTab = null)} />
+    {/if}
   </div>
 </div>

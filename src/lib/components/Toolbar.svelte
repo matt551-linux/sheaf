@@ -14,8 +14,9 @@
     onImportForm: () => void;
     onValidateForm: () => void;
     onOrganize: () => void;
+    onSecurity: (tab: "sign" | "signatures" | "protect") => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -148,8 +149,20 @@
       title="Show or hide annotation tools"
     >Annotate</button>
     <button class={btn} disabled={!hasDoc} onclick={onOrganize} title="Reorder, rotate, delete, insert, extract, crop, and stamp pages">Organize</button>
+    <button class={btn} disabled={!hasDoc} onclick={() => onSecurity("sign")} title="Digitally sign, verify signatures, password-protect">Sign &amp; protect</button>
 
     <span class="flex-1"></span>
+    {#if docStore.doc && docStore.signatures.length}
+      {@const worst = docStore.signatures.some((s) => s.status === "invalid") ? "invalid" : docStore.signatures.some((s) => s.status === "modified") ? "modified" : docStore.signatures.every((s) => s.status === "valid") ? "valid" : "unknown"}
+      <button
+        class="mr-2 rounded px-2 py-0.5 text-xs {worst === 'valid' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100' : worst === 'invalid' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100' : 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100'}"
+        onclick={() => onSecurity("signatures")}
+        title="Show signatures"
+      >{worst === "valid" ? "Signed" : worst === "invalid" ? "Signature invalid" : worst === "modified" ? "Signed, then changed" : "Signed (unverified)"}</button>
+    {/if}
+    {#if docStore.doc?.encrypted}
+      <button class="mr-2 text-xs text-neutral-500 hover:underline" onclick={() => onSecurity("protect")} title="Document security">🔒</button>
+    {/if}
     {#if docStore.doc}
       <button class="truncate text-sm text-neutral-500 hover:underline" title="Document properties (Ctrl+D)" onclick={onProperties}>
         {docStore.doc.modified ? "* " : ""}{docStore.doc.file_name}
