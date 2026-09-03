@@ -131,23 +131,13 @@ pub fn save_document(
 }
 
 /// Write the current document state (including unsaved annotations) to a
-/// temp file and hand it to the OS print pipeline. The open happens on the
-/// Rust side because the temp path is app-generated (never user input) and
-/// the webview opener scope rightly refuses arbitrary paths.
+/// temp file so callers can hand it to an external tool. (In-app printing
+/// renders pages via the engine and prints from the main window.)
 #[tauri::command]
-pub fn export_for_print(
-    app: tauri::AppHandle,
-    engine: State<'_, Engine>,
-    id: u32,
-) -> Result<String> {
-    use tauri_plugin_opener::OpenerExt;
+pub fn export_for_print(engine: State<'_, Engine>, id: u32) -> Result<String> {
     let dir = std::env::temp_dir().join("sheaf-print");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("print-{id}-{}.pdf", std::process::id()));
     engine.save_copy(id, path.clone())?;
-    let path_str = path.to_string_lossy().into_owned();
-    app.opener()
-        .open_path(&path_str, None::<&str>)
-        .map_err(|e| crate::error::SheafError::Engine(format!("could not open print copy: {e}")))?;
-    Ok(path_str)
+    Ok(path.to_string_lossy().into_owned())
 }

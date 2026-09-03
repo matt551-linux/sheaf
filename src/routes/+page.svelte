@@ -45,16 +45,51 @@
     return docStore.save(null, false);
   }
 
+  let printing = $state(false);
+
   async function print() {
-    if (!docStore.doc) return;
+    const doc = docStore.doc;
+    if (!doc || printing) return;
+    printing = true;
     try {
-      // The backend writes a print-ready copy (annotations included) and
-      // hands it to the OS default PDF handler; the user picks the printer
-      // there. A native print dialog is a later milestone.
-      await api.exportForPrint(docStore.doc.id);
-      docStore.showToast("Opened a print copy in your system PDF handler");
+      // Render every page with our own engine (annotations included) and
+      // print the images through the standard browser print dialog. No
+      // external PDF handler involved.
+      docStore.showToast("Preparing print…");
+      const scale = 2 * (96 / 72); // ~192 DPI raster
+      const pages: string[] = [];
+      for (let i = 0; i < doc.page_count; i++) {
+        const r = await api.renderPage(doc.id, i, scale, 0);
+        pages.push(`data:image/png;base64,${r.png_base64}`);
+      }
+
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+      document.body.appendChild(frame);
+      const fdoc = frame.contentDocument!;
+      fdoc.open();
+      fdoc.write(
+        `<!doctype html><html><head><title>${doc.file_name}</title><style>` +
+          `@page{margin:0}html,body{margin:0;padding:0}` +
+          `img{display:block;width:100%;page-break-after:always}img:last-child{page-break-after:auto}` +
+          `</style></head><body>` +
+          pages.map((p) => `<img src="${p}">`).join("") +
+          `</body></html>`,
+      );
+      fdoc.close();
+
+      // Wait for the images to decode before opening the dialog.
+      await Promise.all([...fdoc.images].map((img) => (img.decode ? img.decode().catch(() => {}) : Promise.resolve())));
+      frame.contentWindow!.focus();
+      frame.contentWindow!.print();
+      // Keep the frame alive while the dialog is up; clean up afterwards.
+      const cleanup = () => setTimeout(() => frame.remove(), 1000);
+      frame.contentWindow!.addEventListener("afterprint", cleanup, { once: true });
+      setTimeout(cleanup, 120_000);
     } catch (e) {
       docStore.showToast(`Print failed: ${e}`);
+    } finally {
+      printing = false;
     }
   }
 
