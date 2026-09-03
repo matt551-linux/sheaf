@@ -117,6 +117,14 @@
   }
 
   const head = "border-b border-neutral-200 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-700";
+
+  const railTabs: { id: Exclude<typeof docStore.navPanel, "none">; glyph: string; label: string }[] = [
+    { id: "thumbnails", glyph: "▦", label: "Pages" },
+    { id: "bookmarks", glyph: "☰", label: "Bookmarks" },
+    { id: "search", glyph: "⌕", label: "Find (Ctrl+F)" },
+    { id: "comments", glyph: "🗨", label: "Comments" },
+    { id: "attachments", glyph: "📎", label: "Attachments" },
+  ];
 </script>
 
 {#snippet outlineTree(nodes: OutlineNode[], depth: number)}
@@ -135,6 +143,19 @@
     {/each}
   </ul>
 {/snippet}
+
+{#if docStore.doc}
+  <div class="flex h-full w-9 shrink-0 flex-col items-center gap-1 border-r border-neutral-300 bg-neutral-100 py-2 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
+    {#each railTabs as t}
+      <button
+        class="flex h-8 w-8 items-center justify-center rounded text-base hover:bg-neutral-200 dark:hover:bg-neutral-700 {docStore.navPanel === t.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100' : ''}"
+        title={t.label}
+        aria-pressed={docStore.navPanel === t.id}
+        onclick={() => (docStore.navPanel = docStore.navPanel === t.id ? "none" : t.id)}
+      >{t.glyph}</button>
+    {/each}
+  </div>
+{/if}
 
 {#if docStore.doc && docStore.navPanel !== "none"}
   <aside class="flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-neutral-300 bg-neutral-50 text-neutral-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100">

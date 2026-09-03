@@ -4,7 +4,6 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { ask, open, save } from "@tauri-apps/plugin-dialog";
-  import { openPath } from "@tauri-apps/plugin-opener";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Toolbar from "$lib/components/Toolbar.svelte";
   import NavPanel from "$lib/components/NavPanel.svelte";
@@ -49,10 +48,10 @@
   async function print() {
     if (!docStore.doc) return;
     try {
-      const p = await api.exportForPrint(docStore.doc.id);
-      // Hand the print-ready copy to the OS default handler; the user picks
-      // the printer there. A native print dialog is a later milestone.
-      await openPath(p);
+      // The backend writes a print-ready copy (annotations included) and
+      // hands it to the OS default PDF handler; the user picks the printer
+      // there. A native print dialog is a later milestone.
+      await api.exportForPrint(docStore.doc.id);
       docStore.showToast("Opened a print copy in your system PDF handler");
     } catch (e) {
       docStore.showToast(`Print failed: ${e}`);
