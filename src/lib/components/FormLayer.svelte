@@ -136,8 +136,12 @@
           {/each}
         </select>
       {:else if f.kind === "listbox"}
+        {@const btnH = Math.min(r.h, CONTROL_H * zoom)}
+        <!-- PDFium paints the original full-height list into the page bitmap;
+             cover the whole widget rect so it doesn't show behind the compact
+             dropdown. -->
+        <div class="absolute bg-white" style="left:{r.x - 2}px;top:{r.y - 2}px;width:{r.w + 4}px;height:{r.h + 4}px" aria-hidden="true"></div>
         {#if f.multiselect}
-          {@const btnH = Math.min(r.h, CONTROL_H * zoom)}
           <div data-listbox-popup class="absolute" style="left:{r.x}px;top:{r.y}px;width:{r.w}px">
             <button
               type="button"
@@ -171,7 +175,7 @@
         {:else}
           <select
             class="absolute border border-blue-300/70 bg-[#eef3fd] text-neutral-900 focus:outline focus:outline-2 focus:outline-blue-500"
-            style="left:{r.x}px;top:{r.y}px;width:{r.w}px;height:{Math.min(r.h, CONTROL_H * zoom)}px;font-size:{fontPx}px"
+            style="left:{r.x}px;top:{r.y}px;width:{r.w}px;height:{btnH}px;font-size:{fontPx}px"
             disabled={f.readonly}
             aria-label={f.alt_name || f.name}
             onchange={(e) => void docStore.setFormField(index, f.annot_index, (e.currentTarget as HTMLSelectElement).value)}
