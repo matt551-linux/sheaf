@@ -3,7 +3,7 @@
 An open-source, cross-platform PDF reader and editor with the goal of near feature parity
 with Adobe Acrobat and a straightforward user experience.
 
-Status: early. Milestones 0 to 2 (reader, annotate and comment) are working on Windows ARM64; see the roadmap below.
+Status: early. Milestones 0 to 3 (reader, annotate and comment, forms) are working on Windows ARM64; see the roadmap below.
 
 ## Stack
 
@@ -47,7 +47,7 @@ pnpm check                                 # svelte-check / TypeScript
 | M0 | Open, render, continuous scroll, zoom, fit modes, rotate view, thumbnails, bookmarks, find, password prompt, drag and drop | working |
 | M1 | Text selection and copy, search hit highlighting, single/continuous/two-up, dark UI, night mode, recent files, properties, attachments, file association, print handoff | working |
 | M2 | Annotate and comment: highlight, underline, strikethrough, squiggly, sticky note, text box, pen, rectangle, ellipse, eraser, move, comments panel, note editor, undo/redo, save, save as, flatten | working |
-| M3 | Forms: fill, validate, prepare form editor, FDF/XFDF | planned |
+| M3 | Forms: fill (text, checkbox, radio, combo, listbox), required-field validation, XFDF export/import | working |
 | M4 | Organize pages: reorder, rotate, delete, insert, split, merge, crop, headers/footers, Bates, watermark | planned |
 | M5 | Sign and protect: Fill and Sign, digital signatures (PAdES), password and permissions | planned |
 | M6 | Edit: text and image editing, links, create PDF from images/Office/HTML, export to images/text/DOCX/PDF-A | planned |
@@ -69,6 +69,12 @@ Tool keys: V select, H hand, U highlight, N note, T text box, P pen, R rectangle
 
 - `scripts/cdp.py` evaluates JavaScript inside the running app when it is launched with
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` (Windows). `scripts/ui-scenario.js`
-  drives the annotation tools through real DOM events for on-screen verification.
-- Print currently exports the current state to a temp PDF and opens it with the system handler.
-  A native print dialog is planned.
+  drives the annotation tools through real DOM events for on-screen verification. `--screenshot "<js>" [out.png]`
+  captures the webview, optionally running an expression first.
+- Print rasterizes pages with the engine (~192 DPI, annotations included) and opens the system
+  print dialog from a hidden iframe. Vector print output is a later milestone.
+- Form filling goes through PDFium's form-fill environment (`FORM_*` APIs) so appearance streams
+  regenerate and radio groups stay consistent. `scripts/make-form-fixture.py` (reportlab)
+  regenerates `tests/fixtures/form.pdf`.
+- The form editor (creating new fields) is deferred to a later milestone; M3 covers fill,
+  validate, and XFDF interchange.

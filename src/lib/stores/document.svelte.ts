@@ -9,6 +9,7 @@ import {
   type AnnotationSpec,
   type Color,
   type DocumentInfo,
+  type FormField,
   type OutlineNode,
   type PageText,
   type SearchHit,
@@ -106,6 +107,11 @@ class DocumentStore {
   /** Annotations per page. */
   annots = $state<Record<number, Annotation[]>>({});
   selected = $state<Selected | null>(null);
+
+  /** Form fields per page (widgets), loaded lazily like annotations. */
+  formFields = $state<Record<number, FormField[]>>({});
+  /** Show interactive form field overlays. */
+  formMode = $state(true);
 
   searchQuery = $state("");
   searchHits = $state<SearchHit[]>([]);
@@ -252,6 +258,7 @@ class DocumentStore {
     this.searchQuery = "";
     this.texts = {};
     this.annots = {};
+    this.formFields = {};
     this.selection = null;
     this.selected = null;
   }
@@ -357,6 +364,54 @@ class DocumentStore {
     return list;
   }
 
+  async ensureFormFields(page: number, force = false): Promise<FormField[]> {
+    if (!this.doc) return [];
+    if (!force && this.formFields[page]) return this.formFields[page];
+    const list = await api.listFormFields(this.doc.id, page).catch(() => []);
+    if (this.doc) this.formFields = { ...this.formFields, [page]: list };
+    return list;
+  }
+
+  /** Set a field value and refresh that page (radio groups may change siblings). */
+  async setFormField(page: number, annotIndex: number, value: string): Promise<boolean> {
+    if (!this.doc) return false;
+    try {
+      await api.setFormFieldValue(this.doc.id, page, annotIndex, value);
+      this.doc = await api.documentInfo(this.doc.id);
+      await this.ensureFormFields(page, true);
+      this.invalidateRenders();
+      return true;
+    } catch (e) {
+      this.showToast(`Could not set field: ${errorMessage(e)}`);
+      return false;
+    }
+  }
+
+  /** Empty required fields across the whole document (loads all pages). */
+  async findMissingRequired(): Promise<FormField[]> {
+    if (!this.doc) return [];
+    const missing: FormField[] = [];
+    const byName = new Map<string, boolean>(); // radio groups: any checked?
+    const all: FormField[] = [];
+    for (let p = 0; p < this.doc.page_count; p++) all.push(...(await this.ensureFormFields(p)));
+    for (const f of all) {
+      if (f.kind === "radio") byName.set(f.name, (byName.get(f.name) ?? false) || f.checked);
+    }
+    for (const f of all) {
+      if (!f.required || f.readonly) continue;
+      if (f.kind === "text" || f.kind === "combo") {
+        if (!f.value.trim()) missing.push(f);
+      } else if (f.kind === "checkbox") {
+        if (!f.checked) missing.push(f);
+      } else if (f.kind === "radio") {
+        if (!byName.get(f.name) && !missing.some((m) => m.name === f.name)) missing.push(f);
+      } else if (f.kind === "listbox") {
+        if (!f.options.some((o) => o.selected)) missing.push(f);
+      }
+    }
+    return missing;
+  }
+
   private async afterMutation(page: number) {
     this.annots = { ...this.annots, [page]: await api.listAnnotations(this.doc!.id, page).catch(() => []) };
     this.invalidateRenders();
@@ -419,6 +474,10 @@ class DocumentStore {
     const fresh: Record<number, Annotation[]> = {};
     for (const p of pages) fresh[p] = await api.listAnnotations(info.id, p).catch(() => []);
     this.annots = fresh;
+    const formPages = Object.keys(this.formFields).map(Number);
+    const freshForms: Record<number, FormField[]> = {};
+    for (const p of formPages) freshForms[p] = await api.listFormFields(info.id, p).catch(() => []);
+    this.formFields = freshForms;
     this.invalidateRenders();
   }
 

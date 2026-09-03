@@ -154,6 +154,29 @@ export interface SheafError {
   message: string;
 }
 
+export interface FormFieldOption {
+  label: string;
+  selected: boolean;
+}
+
+export interface FormField {
+  page_index: number;
+  annot_index: number;
+  name: string;
+  alt_name: string;
+  kind: "text" | "checkbox" | "radio" | "combo" | "listbox" | "button" | "signature" | "unknown";
+  value: string;
+  rect: Rect;
+  readonly: boolean;
+  required: boolean;
+  multiline: boolean;
+  password: boolean;
+  multiselect: boolean;
+  export_value: string;
+  checked: boolean;
+  options: FormFieldOption[];
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -189,4 +212,10 @@ export const api = {
   saveDocument: (id: number, path: string | null, flatten = false) =>
     invoke<DocumentInfo>("save_document", { id, options: { path, flatten } }),
   exportForPrint: (id: number) => invoke<string>("export_for_print", { id }),
+  listFormFields: (id: number, page: number) =>
+    invoke<FormField[]>("list_form_fields", { id, page }),
+  setFormFieldValue: (id: number, page: number, annotIndex: number, value: string) =>
+    invoke<FormField>("set_form_field_value", { id, page, annotIndex, value }),
+  exportXfdf: (id: number, path: string) => invoke<void>("export_xfdf", { id, path }),
+  importXfdf: (id: number, path: string) => invoke<number>("import_xfdf", { id, path }),
 };

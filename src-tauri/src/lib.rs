@@ -83,6 +83,10 @@ pub fn run() {
             commands::redo,
             commands::save_document,
             commands::export_for_print,
+            commands::list_form_fields,
+            commands::set_form_field_value,
+            commands::export_xfdf,
+            commands::import_xfdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

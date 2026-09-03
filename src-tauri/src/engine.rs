@@ -56,6 +56,22 @@ const FPDF_ANNOT_APPEARANCEMODE_NORMAL: u32 = 0;
 const FPDFANNOT_COLORTYPE_FPDFANNOT_COLORTYPE_Color: FPDFANNOT_COLORTYPE = 0;
 const FPDFANNOT_COLORTYPE_FPDFANNOT_COLORTYPE_InteriorColor: FPDFANNOT_COLORTYPE = 1;
 
+// Form field types (fpdf_formfill.h).
+const FPDF_FORMFIELD_PUSHBUTTON: i32 = 1;
+const FPDF_FORMFIELD_CHECKBOX: i32 = 2;
+const FPDF_FORMFIELD_RADIOBUTTON: i32 = 3;
+const FPDF_FORMFIELD_COMBOBOX: i32 = 4;
+const FPDF_FORMFIELD_LISTBOX: i32 = 5;
+const FPDF_FORMFIELD_TEXTFIELD: i32 = 6;
+const FPDF_FORMFIELD_SIGNATURE: i32 = 7;
+
+// Field flags (PDF 1.7 table 220/226/230).
+const FIELD_FLAG_READONLY: u32 = 1;
+const FIELD_FLAG_REQUIRED: u32 = 1 << 1;
+const FIELD_FLAG_MULTILINE: u32 = 1 << 12;
+const FIELD_FLAG_PASSWORD: u32 = 1 << 13;
+const FIELD_FLAG_MULTISELECT: u32 = 1 << 21;
+
 // ---------- Public data model (serialized to the frontend) ----------
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +146,36 @@ pub struct PageText {
     pub index: u16,
     pub text: String,
     pub chars: Vec<TextChar>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FormFieldOption {
+    pub label: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FormField {
+    pub page_index: u16,
+    /// Annotation index of the widget on its page.
+    pub annot_index: u32,
+    /// Fully qualified field name ("T", dotted for hierarchies).
+    pub name: String,
+    /// Alternate/tooltip name ("TU"), shown to users.
+    pub alt_name: String,
+    /// "text" | "checkbox" | "radio" | "combo" | "listbox" | "button" | "signature" | "unknown"
+    pub kind: String,
+    pub value: String,
+    pub rect: Rect,
+    pub readonly: bool,
+    pub required: bool,
+    pub multiline: bool,
+    pub password: bool,
+    pub multiselect: bool,
+    /// Export value for checkboxes/radios ("AS" on state), when available.
+    pub export_value: String,
+    pub checked: bool,
+    pub options: Vec<FormFieldOption>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -308,6 +354,10 @@ enum Request {
     Redo(DocId, Sender<Result<DocumentInfo>>),
     Save(DocId, SaveOptions, Sender<Result<DocumentInfo>>),
     SaveCopy(DocId, PathBuf, Sender<Result<()>>),
+    ListFormFields(DocId, u16, Sender<Result<Vec<FormField>>>),
+    SetFormFieldValue(DocId, u16, u32, String, Sender<Result<FormField>>),
+    ExportXfdf(DocId, Sender<Result<String>>),
+    ImportXfdf(DocId, String, Sender<Result<u32>>),
 }
 
 #[derive(Clone)]
@@ -426,6 +476,27 @@ impl Engine {
     /// Write the current state to `path` without changing the open document.
     pub fn save_copy(&self, id: DocId, path: PathBuf) -> Result<()> {
         self.call(|r| Request::SaveCopy(id, path, r))
+    }
+    pub fn list_form_fields(&self, id: DocId, page: u16) -> Result<Vec<FormField>> {
+        self.call(|r| Request::ListFormFields(id, page, r))
+    }
+    /// Set a field's value. For text/combo/listbox `value` is the text (listbox
+    /// multiselect joins values with '\n'); for checkbox/radio it is "on"/"off".
+    pub fn set_form_field_value(
+        &self,
+        id: DocId,
+        page: u16,
+        annot_index: u32,
+        value: String,
+    ) -> Result<FormField> {
+        self.call(|r| Request::SetFormFieldValue(id, page, annot_index, value, r))
+    }
+    pub fn export_xfdf(&self, id: DocId) -> Result<String> {
+        self.call(|r| Request::ExportXfdf(id, r))
+    }
+    /// Apply field values from an XFDF document; returns how many fields matched.
+    pub fn import_xfdf(&self, id: DocId, xfdf: String) -> Result<u32> {
+        self.call(|r| Request::ImportXfdf(id, xfdf, r))
     }
 }
 
@@ -549,6 +620,18 @@ impl EngineState {
                     std::fs::write(p, bytes)?;
                     Ok(())
                 })());
+            }
+            Request::ListFormFields(id, p, r) => {
+                let _ = r.send(self.list_form_fields(id, p));
+            }
+            Request::SetFormFieldValue(id, p, i, v, r) => {
+                let _ = r.send(self.set_form_field_value(id, p, i, &v));
+            }
+            Request::ExportXfdf(id, r) => {
+                let _ = r.send(self.export_xfdf(id));
+            }
+            Request::ImportXfdf(id, x, r) => {
+                let _ = r.send(self.import_xfdf(id, &x));
             }
         }
     }
@@ -1415,6 +1498,370 @@ impl EngineState {
         Ok(())
     }
 
+    // ----- forms -----
+
+    /// UTF-16 string via the (buf, buflen)->len pattern shared by the
+    /// FPDFAnnot_GetFormField* getters.
+    fn form_string(
+        &self,
+        get: impl Fn(*mut FPDF_WCHAR, std::os::raw::c_ulong) -> std::os::raw::c_ulong,
+    ) -> String {
+        let len = get(std::ptr::null_mut(), 0);
+        if len <= 2 {
+            return String::new();
+        }
+        let mut buf = vec![0u16; (len as usize) / 2];
+        get(buf.as_mut_ptr(), len);
+        utf16_to_string(&buf)
+    }
+
+    fn read_form_field(
+        &self,
+        d: &OpenDoc,
+        page_index: u16,
+        a: FPDF_ANNOTATION,
+        annot_index: u32,
+    ) -> FormField {
+        let b = &self.b;
+        let form = d.form;
+        let ty = unsafe { b.FPDFAnnot_GetFormFieldType(form, a) };
+        let kind = match ty {
+            FPDF_FORMFIELD_PUSHBUTTON => "button",
+            FPDF_FORMFIELD_CHECKBOX => "checkbox",
+            FPDF_FORMFIELD_RADIOBUTTON => "radio",
+            FPDF_FORMFIELD_COMBOBOX => "combo",
+            FPDF_FORMFIELD_LISTBOX => "listbox",
+            FPDF_FORMFIELD_TEXTFIELD => "text",
+            FPDF_FORMFIELD_SIGNATURE => "signature",
+            _ => "unknown",
+        };
+        let mut r = FS_RECTF {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        };
+        unsafe { b.FPDFAnnot_GetRect(a, &mut r) };
+        let flags = unsafe { b.FPDFAnnot_GetFormFieldFlags(form, a) } as u32;
+        let name =
+            self.form_string(|buf, len| unsafe { b.FPDFAnnot_GetFormFieldName(form, a, buf, len) });
+        let alt_name = self.form_string(|buf, len| unsafe {
+            b.FPDFAnnot_GetFormFieldAlternateName(form, a, buf, len)
+        });
+        let value = self
+            .form_string(|buf, len| unsafe { b.FPDFAnnot_GetFormFieldValue(form, a, buf, len) });
+        let export_value = self.form_string(|buf, len| unsafe {
+            b.FPDFAnnot_GetFormFieldExportValue(form, a, buf, len)
+        });
+        let checked = matches!(ty, FPDF_FORMFIELD_CHECKBOX | FPDF_FORMFIELD_RADIOBUTTON)
+            && unsafe { b.FPDFAnnot_IsChecked(form, a) } != 0;
+        let options = if matches!(ty, FPDF_FORMFIELD_COMBOBOX | FPDF_FORMFIELD_LISTBOX) {
+            let n = unsafe { b.FPDFAnnot_GetOptionCount(form, a) }.max(0);
+            (0..n)
+                .map(|i| FormFieldOption {
+                    label: self.form_string(|buf, len| unsafe {
+                        b.FPDFAnnot_GetOptionLabel(form, a, i, buf, len)
+                    }),
+                    selected: unsafe { b.FPDFAnnot_IsOptionSelected(form, a, i) } != 0,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        FormField {
+            page_index,
+            annot_index,
+            name,
+            alt_name,
+            kind: kind.into(),
+            value,
+            rect: Rect {
+                x: r.left,
+                y: r.bottom.min(r.top),
+                w: (r.right - r.left).abs(),
+                h: (r.top - r.bottom).abs(),
+            },
+            readonly: flags & FIELD_FLAG_READONLY != 0,
+            required: flags & FIELD_FLAG_REQUIRED != 0,
+            multiline: flags & FIELD_FLAG_MULTILINE != 0,
+            password: flags & FIELD_FLAG_PASSWORD != 0,
+            multiselect: flags & FIELD_FLAG_MULTISELECT != 0,
+            export_value,
+            checked,
+            options,
+        }
+    }
+
+    fn list_form_fields(&self, id: DocId, page: u16) -> Result<Vec<FormField>> {
+        let d = self.doc(id)?;
+        if d.form.is_null() {
+            return Ok(Vec::new());
+        }
+        let b = &self.b;
+        let p = self.page(d, page)?;
+        let n = unsafe { b.FPDFPage_GetAnnotCount(p.page) }.max(0);
+        let mut out = Vec::new();
+        for i in 0..n {
+            let a = unsafe { b.FPDFPage_GetAnnot(p.page, i) };
+            if a.is_null() {
+                continue;
+            }
+            let is_widget = unsafe { b.FPDFAnnot_GetSubtype(a) } == FPDF_ANNOT_WIDGET as i32;
+            if is_widget {
+                let ty = unsafe { b.FPDFAnnot_GetFormFieldType(d.form, a) };
+                if ty != FPDF_FORMFIELD_PUSHBUTTON {
+                    out.push(self.read_form_field(d, page, a, i as u32));
+                }
+            }
+            unsafe { b.FPDFPage_CloseAnnot(a) };
+        }
+        Ok(out)
+    }
+
+    /// Set a widget's value through the form-fill environment so PDFium
+    /// regenerates appearance streams and keeps radio groups consistent.
+    fn set_form_field_value(
+        &mut self,
+        id: DocId,
+        page: u16,
+        annot_index: u32,
+        value: &str,
+    ) -> Result<FormField> {
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        if d.form.is_null() {
+            return Err(SheafError::Pdf("document has no form".into()));
+        }
+        let b = &self.b;
+        let p = self.page(d, page)?;
+        let a = unsafe { b.FPDFPage_GetAnnot(p.page, annot_index as i32) };
+        if a.is_null() {
+            return Err(SheafError::Pdf(format!(
+                "no annotation {annot_index} on page {page}"
+            )));
+        }
+        let close = |a| unsafe { b.FPDFPage_CloseAnnot(a) };
+        let ty = unsafe { b.FPDFAnnot_GetFormFieldType(d.form, a) };
+        let flags = unsafe { b.FPDFAnnot_GetFormFieldFlags(d.form, a) } as u32;
+        if flags & FIELD_FLAG_READONLY != 0 {
+            close(a);
+            return Err(SheafError::Pdf("field is read-only".into()));
+        }
+        let focus_ok = unsafe { b.FORM_SetFocusedAnnot(d.form, a) } != 0;
+        if !focus_ok {
+            close(a);
+            return Err(SheafError::Pdf("could not focus form field".into()));
+        }
+        match ty {
+            FPDF_FORMFIELD_TEXTFIELD => unsafe {
+                b.FORM_SelectAllText(d.form, p.page);
+                let mut wide: Vec<u16> = value.encode_utf16().collect();
+                wide.push(0);
+                b.FORM_ReplaceSelection(d.form, p.page, wide.as_ptr());
+            },
+            FPDF_FORMFIELD_COMBOBOX => unsafe {
+                // Prefer selecting a matching option (works for non-editable
+                // combos); fall back to typing for editable ones.
+                let n = b.FPDFAnnot_GetOptionCount(d.form, a).max(0);
+                let mut matched = false;
+                for i in 0..n {
+                    let label = self
+                        .form_string(|buf, len| b.FPDFAnnot_GetOptionLabel(d.form, a, i, buf, len));
+                    if label.eq_ignore_ascii_case(value) {
+                        b.FORM_SetIndexSelected(d.form, p.page, i, 1);
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    b.FORM_SelectAllText(d.form, p.page);
+                    let mut wide: Vec<u16> = value.encode_utf16().collect();
+                    wide.push(0);
+                    b.FORM_ReplaceSelection(d.form, p.page, wide.as_ptr());
+                }
+            },
+            FPDF_FORMFIELD_CHECKBOX | FPDF_FORMFIELD_RADIOBUTTON => unsafe {
+                // Toggling happens through a click cycle at the widget center.
+                let mut r = FS_RECTF {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                };
+                b.FPDFAnnot_GetRect(a, &mut r);
+                let (cx, cy) = ((r.left + r.right) / 2.0, (r.top + r.bottom) / 2.0);
+                let already = b.FPDFAnnot_IsChecked(d.form, a) != 0;
+                let want = value != "off";
+                if already != want {
+                    b.FORM_OnLButtonDown(d.form, p.page, 0, cx.into(), cy.into());
+                    b.FORM_OnLButtonUp(d.form, p.page, 0, cx.into(), cy.into());
+                }
+            },
+            FPDF_FORMFIELD_LISTBOX => unsafe {
+                let wanted: Vec<&str> = value.split('\n').filter(|s| !s.is_empty()).collect();
+                let n = b.FPDFAnnot_GetOptionCount(d.form, a).max(0);
+                for i in 0..n {
+                    let label = self
+                        .form_string(|buf, len| b.FPDFAnnot_GetOptionLabel(d.form, a, i, buf, len));
+                    b.FORM_SetIndexSelected(
+                        d.form,
+                        p.page,
+                        i,
+                        wanted.contains(&label.as_str()) as i32,
+                    );
+                }
+            },
+            _ => {
+                close(a);
+                return Err(SheafError::Pdf("field type cannot be set".into()));
+            }
+        }
+        // Commit: kill focus so PDFium flushes the value into the field dict.
+        unsafe { b.FORM_ForceToKillFocus(d.form) };
+        let field = self.read_form_field(d, page, a, annot_index);
+        close(a);
+        unsafe { b.FPDFPage_GenerateContent(p.page) };
+        Ok(field)
+    }
+
+    fn all_form_fields(&self, id: DocId) -> Result<Vec<FormField>> {
+        let d = self.doc(id)?;
+        let count = unsafe { self.b.FPDF_GetPageCount(d.handle) }.max(0) as u16;
+        let mut out = Vec::new();
+        for i in 0..count {
+            out.extend(self.list_form_fields(id, i)?);
+        }
+        Ok(out)
+    }
+
+    fn export_xfdf(&self, id: DocId) -> Result<String> {
+        let d = self.doc(id)?;
+        let href = xml_escape(&d.path.to_string_lossy());
+        let fields = self.all_form_fields(id)?;
+        // Group widgets by fully qualified name; radio groups share one name.
+        let mut by_name: Vec<(String, String)> = Vec::new();
+        for f in &fields {
+            if f.kind == "signature" || f.kind == "button" {
+                continue;
+            }
+            let value = match f.kind.as_str() {
+                "checkbox" | "radio" => {
+                    if f.checked {
+                        if f.export_value.is_empty() {
+                            "On".to_string()
+                        } else {
+                            f.export_value.clone()
+                        }
+                    } else if f.kind == "radio" {
+                        continue; // unchecked radios: the checked sibling wins
+                    } else {
+                        "Off".to_string()
+                    }
+                }
+                "listbox" => f
+                    .options
+                    .iter()
+                    .filter(|o| o.selected)
+                    .map(|o| o.label.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => f.value.clone(),
+            };
+            match by_name.iter_mut().find(|(n, _)| *n == f.name) {
+                Some(e) => e.1 = value,
+                None => by_name.push((f.name.clone(), value)),
+            }
+        }
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n  <fields>\n",
+        );
+        for (name, value) in by_name {
+            let values = if value.contains('\n') && name != "comments" {
+                value
+                    .split('\n')
+                    .map(|v| format!("<value>{}</value>", xml_escape(v)))
+                    .collect::<String>()
+            } else {
+                format!("<value>{}</value>", xml_escape(&value))
+            };
+            xml.push_str(&format!(
+                "    <field name=\"{}\">{}</field>\n",
+                xml_escape(&name),
+                values
+            ));
+        }
+        xml.push_str(&format!("  </fields>\n  <f href=\"{href}\"/>\n</xfdf>\n"));
+        Ok(xml)
+    }
+
+    fn import_xfdf(&mut self, id: DocId, xfdf: &str) -> Result<u32> {
+        let values = parse_xfdf_fields(xfdf);
+        if values.is_empty() {
+            return Err(SheafError::Pdf("no <field> entries found in XFDF".into()));
+        }
+        self.checkpoint(id)?;
+        let fields = self.all_form_fields(id)?;
+        let mut applied = 0u32;
+        for f in &fields {
+            let Some(wanted) = values.get(&f.name) else {
+                continue;
+            };
+            let value = match f.kind.as_str() {
+                "checkbox" => {
+                    let on = !wanted.is_empty() && !wanted[0].eq_ignore_ascii_case("off");
+                    if on { "on" } else { "off" }.to_string()
+                }
+                "radio" => {
+                    let export = if f.export_value.is_empty() {
+                        "On".to_string()
+                    } else {
+                        f.export_value.clone()
+                    };
+                    if wanted.first().map(|w| *w == export).unwrap_or(false) {
+                        "on".to_string()
+                    } else {
+                        continue; // not this widget's export value
+                    }
+                }
+                "listbox" => wanted.join("\n"),
+                "text" | "combo" => wanted.first().cloned().unwrap_or_default(),
+                _ => continue,
+            };
+            // checkpoint() already ran once; set values without stacking more.
+            let d = self.doc(id)?;
+            if d.form.is_null() {
+                break;
+            }
+            if self
+                .set_form_field_value_nocheckpoint(id, f.page_index, f.annot_index, &value)
+                .is_ok()
+            {
+                applied += 1;
+            }
+        }
+        Ok(applied)
+    }
+
+    fn set_form_field_value_nocheckpoint(
+        &mut self,
+        id: DocId,
+        page: u16,
+        annot_index: u32,
+        value: &str,
+    ) -> Result<FormField> {
+        // Same as set_form_field_value but without pushing an undo snapshot;
+        // used by XFDF import which checkpoints once for the whole batch.
+        let d = self.doc(id)?;
+        let undo_len = d.undo.len();
+        let result = self.set_form_field_value(id, page, annot_index, value);
+        if let Ok(d) = self.doc_mut(id) {
+            while d.undo.len() > undo_len {
+                d.undo.remove(undo_len);
+            }
+        }
+        result
+    }
+
     // ----- save -----
 
     fn save(&mut self, id: DocId, opts: SaveOptions) -> Result<DocumentInfo> {
@@ -1459,6 +1906,65 @@ impl EngineState {
 fn utf16_to_string(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..end])
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn xml_unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// Minimal XFDF reader: extracts `<field name="...">(<value>...</value>)+`
+/// pairs, including Adobe's nested-field form (`<field><field>...`), by
+/// tracking the name path. Tolerates attributes and whitespace; ignores
+/// everything outside `<fields>`.
+fn parse_xfdf_fields(xml: &str) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    let mut path: Vec<String> = Vec::new();
+    let mut rest = xml;
+    while let Some(lt) = rest.find('<') {
+        rest = &rest[lt + 1..];
+        let Some(gt) = rest.find('>') else { break };
+        let tag = &rest[..gt];
+        rest = &rest[gt + 1..];
+        let tag_trim = tag.trim();
+        if let Some(field_tag) = tag_trim.strip_prefix("field") {
+            // Exclude <fields>/</fields> (prefix collision) and </field>.
+            if field_tag.starts_with('s') {
+                continue;
+            }
+            let self_closing = field_tag.trim_end().ends_with('/');
+            let name = field_tag
+                .split("name=\"")
+                .nth(1)
+                .and_then(|s| s.split('"').next())
+                .map(xml_unescape)
+                .unwrap_or_default();
+            if !self_closing {
+                path.push(name);
+            }
+        } else if tag_trim == "/field" {
+            path.pop();
+        } else if tag_trim.starts_with("value") && !tag_trim.ends_with('/') {
+            if let Some(end) = rest.find("</value>") {
+                let value = xml_unescape(rest[..end].trim());
+                rest = &rest[end + 8..];
+                if !path.is_empty() {
+                    out.entry(path.join(".")).or_default().push(value);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn nanos() -> u128 {

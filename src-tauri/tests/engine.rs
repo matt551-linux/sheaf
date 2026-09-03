@@ -359,3 +359,132 @@ fn line_rects_groups_by_line() {
     assert!((r[0].w - 15.0).abs() < 0.01);
     assert!((r[1].w - 10.0).abs() < 0.01);
 }
+
+#[test]
+fn form_fields_list_fill_and_xfdf_roundtrip() {
+    let e = engine();
+    let info = e.open(fixtures().join("form.pdf"), None).unwrap();
+
+    // ---- discovery ----
+    let fields = e.list_form_fields(info.id, 0).unwrap();
+    let kinds: Vec<_> = fields.iter().map(|f| f.kind.as_str()).collect();
+    assert!(kinds.contains(&"text"), "text field found: {kinds:?}");
+    assert!(kinds.contains(&"checkbox"), "checkbox found");
+    assert!(kinds.contains(&"radio"), "radio found");
+    assert!(kinds.contains(&"combo"), "combo found");
+    assert!(kinds.contains(&"listbox"), "listbox found");
+    let name = fields
+        .iter()
+        .find(|f| f.name == "name")
+        .expect("name field");
+    assert!(name.required, "name is flagged required");
+    let comments = fields.iter().find(|f| f.name == "comments").unwrap();
+    assert!(comments.multiline);
+
+    // ---- fill: text ----
+    let idx = name.annot_index;
+    let updated = e
+        .set_form_field_value(info.id, 0, idx, "Brian Haywood".into())
+        .unwrap();
+    assert_eq!(updated.value, "Brian Haywood");
+
+    // ---- fill: checkbox on/off ----
+    let cb = fields.iter().find(|f| f.kind == "checkbox").unwrap();
+    let on = e
+        .set_form_field_value(info.id, 0, cb.annot_index, "on".into())
+        .unwrap();
+    assert!(on.checked, "checkbox turned on");
+    let off = e
+        .set_form_field_value(info.id, 0, cb.annot_index, "off".into())
+        .unwrap();
+    assert!(!off.checked, "checkbox turned off");
+    let on2 = e
+        .set_form_field_value(info.id, 0, cb.annot_index, "on".into())
+        .unwrap();
+    assert!(on2.checked);
+
+    // ---- fill: radio group ----
+    let green = fields
+        .iter()
+        .find(|f| f.kind == "radio" && f.export_value == "green")
+        .expect("green radio");
+    let g = e
+        .set_form_field_value(info.id, 0, green.annot_index, "on".into())
+        .unwrap();
+    assert!(g.checked, "green selected");
+    let after: Vec<_> = e
+        .list_form_fields(info.id, 0)
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.kind == "radio")
+        .collect();
+    assert_eq!(
+        after.iter().filter(|f| f.checked).count(),
+        1,
+        "radio group is exclusive"
+    );
+
+    // ---- fill: combo ----
+    let combo = fields.iter().find(|f| f.kind == "combo").unwrap();
+    let c = e
+        .set_form_field_value(info.id, 0, combo.annot_index, "Large".into())
+        .unwrap();
+    assert_eq!(c.value, "large", "combo stores the option export value");
+
+    // ---- persistence through save ----
+    let out = std::env::temp_dir().join(format!("sheaf-form-{}.pdf", std::process::id()));
+    e.save_copy(info.id, out.clone()).unwrap();
+    let reopened = e.open(out.clone(), None).unwrap();
+    let saved = e.list_form_fields(reopened.id, 0).unwrap();
+    assert_eq!(
+        saved.iter().find(|f| f.name == "name").unwrap().value,
+        "Brian Haywood",
+        "text value survives save"
+    );
+    assert!(
+        saved
+            .iter()
+            .find(|f| f.kind == "radio" && f.export_value == "green")
+            .unwrap()
+            .checked,
+        "radio survives save"
+    );
+    e.close(reopened.id).unwrap();
+    let _ = std::fs::remove_file(out);
+
+    // ---- undo restores previous value ----
+    e.undo(info.id).unwrap(); // undo combo set
+    let undone = e.list_form_fields(info.id, 0).unwrap();
+    assert_ne!(
+        undone.iter().find(|f| f.kind == "combo").unwrap().value,
+        "Large",
+        "undo reverted combo"
+    );
+
+    // ---- XFDF export ----
+    let xml = e.export_xfdf(info.id).unwrap();
+    assert!(xml.contains("name=\"name\""), "xfdf has name field: {xml}");
+    assert!(xml.contains("Brian Haywood"), "xfdf carries value");
+    assert!(xml.contains("name=\"color\""), "radio group exported");
+
+    // ---- XFDF import into a fresh copy ----
+    let fresh = e.open(fixtures().join("form.pdf"), None).unwrap();
+    let n = e.import_xfdf(fresh.id, xml).unwrap();
+    assert!(n >= 3, "several fields applied, got {n}");
+    let imported = e.list_form_fields(fresh.id, 0).unwrap();
+    assert_eq!(
+        imported.iter().find(|f| f.name == "name").unwrap().value,
+        "Brian Haywood",
+        "import applied text value"
+    );
+    assert!(
+        imported
+            .iter()
+            .find(|f| f.kind == "radio" && f.export_value == "green")
+            .unwrap()
+            .checked,
+        "import applied radio selection"
+    );
+    e.close(fresh.id).unwrap();
+    e.close(info.id).unwrap();
+}

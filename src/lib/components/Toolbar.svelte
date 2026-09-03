@@ -10,8 +10,11 @@
     onSaveAs: () => void;
     onPrint: () => void;
     onProperties: () => void;
+    onExportForm: () => void;
+    onImportForm: () => void;
+    onValidateForm: () => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -81,6 +84,10 @@
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onPrint())}>Print… <span class="text-xs text-neutral-400">Ctrl+P</span></button>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onProperties())}>Properties… <span class="text-xs text-neutral-400">Ctrl+D</span></button>
+        <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onValidateForm())}>Validate form</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onImportForm())}>Import form data…</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onExportForm())}>Export form data…</button>
       {/snippet}
     </Menu>
 
@@ -94,6 +101,7 @@
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), docStore.rotateView(90))}>Rotate view right <span class="text-xs text-neutral-400">Ctrl+Shift++</span></button>
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), (docStore.nightMode = !docStore.nightMode))}>{docStore.nightMode ? "✓" : "\u00a0\u00a0"} Night mode</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), (docStore.formMode = !docStore.formMode))}>{docStore.formMode ? "✓" : "\u00a0\u00a0"} Form fields</button>
         <button class={item} role="menuitem" onclick={() => (close(), docStore.setTheme(docStore.theme === "dark" ? "light" : "dark"))}>{docStore.theme === "dark" ? "Light theme" : "Dark theme"}</button>
       {/snippet}
     </Menu>

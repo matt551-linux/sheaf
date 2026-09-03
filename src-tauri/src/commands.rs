@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::engine::{
-    Annotation, AnnotationPatch, AnnotationSpec, DocumentInfo, Engine, OutlineNode, PageText,
-    RenderedPage, SaveOptions, SearchHit,
+    Annotation, AnnotationPatch, AnnotationSpec, DocumentInfo, Engine, FormField, OutlineNode,
+    PageText, RenderedPage, SaveOptions, SearchHit,
 };
 use crate::error::Result;
 
@@ -140,4 +140,33 @@ pub fn export_for_print(engine: State<'_, Engine>, id: u32) -> Result<String> {
     let path = dir.join(format!("print-{id}-{}.pdf", std::process::id()));
     engine.save_copy(id, path.clone())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn list_form_fields(engine: State<'_, Engine>, id: u32, page: u16) -> Result<Vec<FormField>> {
+    engine.list_form_fields(id, page)
+}
+
+#[tauri::command]
+pub fn set_form_field_value(
+    engine: State<'_, Engine>,
+    id: u32,
+    page: u16,
+    annot_index: u32,
+    value: String,
+) -> Result<FormField> {
+    engine.set_form_field_value(id, page, annot_index, value)
+}
+
+#[tauri::command]
+pub fn export_xfdf(engine: State<'_, Engine>, id: u32, path: String) -> Result<()> {
+    let xml = engine.export_xfdf(id)?;
+    std::fs::write(path, xml)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_xfdf(engine: State<'_, Engine>, id: u32, path: String) -> Result<u32> {
+    let xml = std::fs::read_to_string(path)?;
+    engine.import_xfdf(id, xml)
 }

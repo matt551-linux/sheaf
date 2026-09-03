@@ -4,6 +4,7 @@
   // component is CSS page space; conversion to PDF space happens at the edges.
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import type { Annotation, Rect } from "$lib/api";
+  import FormLayer from "./FormLayer.svelte";
   import {
     charAt,
     colorToCss,
@@ -333,6 +334,14 @@
       <polyline points={inkPx(inkPath)} fill="none" stroke={strokeCss} stroke-width={strokeW} stroke-linecap="round" stroke-linejoin="round" />
     {/if}
   </svg>
+
+  {#if tool === "select" || tool === "hand"}
+    <!-- Form controls only take input with non-drawing tools active, so the
+         pen or highlighter still works across widget areas. -->
+    <div role="form" aria-label="Form fields, page {index + 1}" onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()}>
+      <FormLayer {index} />
+    </div>
+  {/if}
 </div>
 
 <style>

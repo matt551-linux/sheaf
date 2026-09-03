@@ -101,6 +101,54 @@
     }
   }
 
+  async function exportFormData() {
+    if (!docStore.doc) return;
+    const path = await save({
+      defaultPath: docStore.doc.path.replace(/\.pdf$/i, ".xfdf"),
+      filters: [{ name: "XFDF form data", extensions: ["xfdf"] }],
+      title: "Export form data",
+    });
+    if (!path) return;
+    try {
+      await api.exportXfdf(docStore.doc.id, path);
+      docStore.showToast("Form data exported");
+    } catch (e) {
+      docStore.showToast(`Export failed: ${e}`);
+    }
+  }
+
+  async function importFormData() {
+    if (!docStore.doc) return;
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "XFDF/FDF form data", extensions: ["xfdf", "fdf", "xml"] }],
+      title: "Import form data",
+    });
+    if (typeof picked !== "string") return;
+    try {
+      const n = await api.importXfdf(docStore.doc.id, picked);
+      docStore.doc = await api.documentInfo(docStore.doc.id);
+      docStore.formFields = {};
+      docStore.invalidateRenders();
+      docStore.showToast(`Applied ${n} field${n === 1 ? "" : "s"}`);
+    } catch (e) {
+      docStore.showToast(`Import failed: ${e}`);
+    }
+  }
+
+  async function validateForm() {
+    if (!docStore.doc) return;
+    const missing = await docStore.findMissingRequired();
+    if (!missing.length) {
+      docStore.showToast("All required fields are filled");
+      return;
+    }
+    const first = missing[0];
+    goToPage(first.page_index);
+    const names = missing.map((m) => m.alt_name || m.name).join(", ");
+    docStore.showToast(`${missing.length} required field${missing.length === 1 ? "" : "s"} empty: ${names}`);
+  }
+
   async function confirmDiscard(): Promise<boolean> {
     if (!docStore.doc?.modified) return true;
     const ok = await ask(`Save changes to ${docStore.doc.file_name}?`, { title: "Unsaved changes", kind: "warning", okLabel: "Save", cancelLabel: "Discard" });
@@ -189,7 +237,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
