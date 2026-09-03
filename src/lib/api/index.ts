@@ -253,6 +253,26 @@ export interface SecuritySpec {
   allow_accessibility: boolean;
 }
 
+// ---------- M6: edit ----------
+
+export interface PageObject {
+  index: number;
+  kind: "text" | "image" | "path" | "shading" | "form" | "unknown";
+  rect: Rect;
+  text: string | null;
+  font: string | null;
+  font_size: number | null;
+  image_width: number | null;
+  image_height: number | null;
+}
+
+export interface LinkInfo {
+  index: number;
+  rect: Rect;
+  uri: string | null;
+  page: number | null;
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -317,4 +337,27 @@ export const api = {
   protectDocument: (id: number, spec: SecuritySpec) =>
     invoke<DocumentInfo>("protect_document", { id, spec }),
   unprotectDocument: (id: number) => invoke<DocumentInfo>("unprotect_document", { id }),
+  listPageObjects: (id: number, page: number) =>
+    invoke<PageObject[]>("list_page_objects", { id, page }),
+  setTextObject: (id: number, page: number, obj: number, text: string, fontSize: number | null = null) =>
+    invoke<DocumentInfo>("set_text_object", { id, page, obj, text, fontSize }),
+  movePageObject: (id: number, page: number, obj: number, dx: number, dy: number, scale = 1) =>
+    invoke<DocumentInfo>("move_page_object", { id, page, obj, dx, dy, scale }),
+  deletePageObject: (id: number, page: number, obj: number) =>
+    invoke<DocumentInfo>("delete_page_object", { id, page, obj }),
+  insertImage: (id: number, page: number, path: string, rect: Rect) =>
+    invoke<DocumentInfo>("insert_image", { id, page, spec: { path, rect } }),
+  addText: (id: number, page: number, text: string, x: number, y: number, fontSize = 12, font = "Helvetica", color: Color | null = null) =>
+    invoke<DocumentInfo>("add_text", { id, page, spec: { text, x, y, font, font_size: fontSize, color } }),
+  extractImage: (id: number, page: number, obj: number, path: string) =>
+    invoke<void>("extract_image", { id, page, obj, path }),
+  listLinks: (id: number, page: number) => invoke<LinkInfo[]>("list_links", { id, page }),
+  addLink: (id: number, page: number, rect: Rect, uri: string | null, pageTarget: number | null) =>
+    invoke<DocumentInfo>("add_link", { id, page, spec: { rect, uri, page: pageTarget } }),
+  createFromImages: (paths: string[], out: string) =>
+    invoke<DocumentInfo>("create_from_images", { paths, out }),
+  exportImages: (id: number, pages: number[], dir: string, dpi = 150) =>
+    invoke<string[]>("export_images", { id, pages, dir, dpi }),
+  exportText: (id: number, pages: number[], path: string) =>
+    invoke<void>("export_text", { id, pages, path }),
 };

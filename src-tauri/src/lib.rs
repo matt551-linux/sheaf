@@ -1,4 +1,5 @@
 mod commands;
+pub mod edit;
 pub mod engine;
 mod error;
 pub mod security;
@@ -119,6 +120,18 @@ pub fn run() {
             commands::list_signatures,
             commands::protect_document,
             commands::unprotect_document,
+            commands::list_page_objects,
+            commands::set_text_object,
+            commands::move_page_object,
+            commands::delete_page_object,
+            commands::insert_image,
+            commands::add_text,
+            commands::extract_image,
+            commands::list_links,
+            commands::add_link,
+            commands::create_from_images,
+            commands::export_images,
+            commands::export_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

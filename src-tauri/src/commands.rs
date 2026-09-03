@@ -6,6 +6,7 @@ use crate::engine::{
     Annotation, AnnotationPatch, AnnotationSpec, DocumentInfo, Engine, FormField, OutlineNode,
     PageText, RenderedPage, SaveOptions, SearchHit, StampSpec,
 };
+use crate::edit::{ImageSpec, LinkInfo, LinkSpec, PageObject, TextSpec};
 use crate::error::Result;
 use crate::security::{Identity, IdentityStore, SecuritySpec, SignSpec, SignatureInfo};
 
@@ -334,4 +335,92 @@ pub async fn protect_document(
 #[tauri::command]
 pub async fn unprotect_document(engine: State<'_, Engine>, id: u32) -> Result<DocumentInfo> {
     engine.unprotect(id)
+}
+
+// ---------- M6: edit ----------
+
+#[tauri::command]
+pub async fn list_page_objects(engine: State<'_, Engine>, id: u32, page: u16) -> Result<Vec<PageObject>> {
+    engine.list_page_objects(id, page)
+}
+
+#[tauri::command]
+pub async fn set_text_object(
+    engine: State<'_, Engine>,
+    id: u32,
+    page: u16,
+    obj: u32,
+    text: String,
+    font_size: Option<f32>,
+) -> Result<DocumentInfo> {
+    engine.set_text_object(id, page, obj, text, font_size)
+}
+
+#[tauri::command]
+pub async fn move_page_object(
+    engine: State<'_, Engine>,
+    id: u32,
+    page: u16,
+    obj: u32,
+    dx: f32,
+    dy: f32,
+    scale: Option<f32>,
+) -> Result<DocumentInfo> {
+    engine.move_page_object(id, page, obj, dx, dy, scale.unwrap_or(1.0))
+}
+
+#[tauri::command]
+pub async fn delete_page_object(engine: State<'_, Engine>, id: u32, page: u16, obj: u32) -> Result<DocumentInfo> {
+    engine.delete_page_object(id, page, obj)
+}
+
+#[tauri::command]
+pub async fn insert_image(engine: State<'_, Engine>, id: u32, page: u16, spec: ImageSpec) -> Result<DocumentInfo> {
+    engine.insert_image(id, page, spec)
+}
+
+#[tauri::command]
+pub async fn extract_image(engine: State<'_, Engine>, id: u32, page: u16, obj: u32, path: String) -> Result<()> {
+    engine.extract_image(id, page, obj, std::path::PathBuf::from(path))
+}
+
+#[tauri::command]
+pub async fn list_links(engine: State<'_, Engine>, id: u32, page: u16) -> Result<Vec<LinkInfo>> {
+    engine.list_links(id, page)
+}
+
+#[tauri::command]
+pub async fn add_link(engine: State<'_, Engine>, id: u32, page: u16, spec: LinkSpec) -> Result<DocumentInfo> {
+    engine.add_link(id, page, spec)
+}
+
+#[tauri::command]
+pub async fn create_from_images(engine: State<'_, Engine>, paths: Vec<String>, out: String) -> Result<DocumentInfo> {
+    engine.create_from_images(
+        paths.into_iter().map(std::path::PathBuf::from).collect(),
+        std::path::PathBuf::from(out),
+    )
+}
+
+#[tauri::command]
+pub async fn export_images(
+    engine: State<'_, Engine>,
+    id: u32,
+    pages: Vec<u16>,
+    dir: String,
+    dpi: Option<f32>,
+) -> Result<Vec<String>> {
+    engine.export_images(id, pages, std::path::PathBuf::from(dir), dpi.unwrap_or(150.0))
+}
+
+#[tauri::command]
+pub async fn export_text(engine: State<'_, Engine>, id: u32, pages: Vec<u16>, path: String) -> Result<()> {
+    let text = engine.export_text(id, pages)?;
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn add_text(engine: State<'_, Engine>, id: u32, page: u16, spec: TextSpec) -> Result<DocumentInfo> {
+    engine.add_text(id, page, spec)
 }

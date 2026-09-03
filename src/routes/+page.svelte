@@ -11,9 +11,10 @@
   import NoteEditor from "$lib/components/NoteEditor.svelte";
   import OrganizeDialog from "$lib/components/OrganizeDialog.svelte";
   import SecurityPanel from "$lib/components/SecurityPanel.svelte";
+  import EditPanel from "$lib/components/EditPanel.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
-  import { api, type Annotation } from "$lib/api";
+  import { api, errorMessage, type Annotation } from "$lib/api";
 
   let canvas: PageCanvas;
   let nav: NavPanel;
@@ -22,6 +23,51 @@
   let showProps = $state(false);
   let showOrganize = $state(false);
   let securityTab = $state<"sign" | "signatures" | "protect" | null>(null);
+  let showEdit = $state(false);
+
+  async function createFromImages() {
+    const picked = await open({ multiple: true, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff"] }] });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (!paths.length) return;
+    const out = await save({ defaultPath: "images.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    if (!out) return;
+    if (docStore.doc?.modified && !(await confirmDiscard())) return;
+    try {
+      docStore.busy = true;
+      if (docStore.doc) await docStore.close();
+      const info = await api.createFromImages(paths, out);
+      docStore.busy = false;
+      await docStore.open(info.path);
+      docStore.showToast(`Created ${info.file_name} with ${info.page_count} page${info.page_count === 1 ? "" : "s"}`);
+    } catch (e) {
+      docStore.busy = false;
+      docStore.showToast(`Could not create PDF: ${errorMessage(e)}`);
+    }
+  }
+  async function exportImages() {
+    const d = docStore.doc;
+    if (!d) return;
+    const dir = await open({ directory: true, title: "Folder for exported PNG pages" });
+    if (!dir || Array.isArray(dir)) return;
+    try {
+      const files = await api.exportImages(d.id, d.pages.map((_, i) => i), dir, 150);
+      docStore.showToast(`Exported ${files.length} PNG file${files.length === 1 ? "" : "s"}`);
+    } catch (e) {
+      docStore.showToast(`Export failed: ${errorMessage(e)}`);
+    }
+  }
+  async function exportText() {
+    const d = docStore.doc;
+    if (!d) return;
+    const path = await save({ defaultPath: d.file_name.replace(/\.pdf$/i, "") + ".txt", filters: [{ name: "Text", extensions: ["txt"] }] });
+    if (!path) return;
+    try {
+      await api.exportText(d.id, d.pages.map((_, i) => i), path);
+      docStore.showToast("Text exported");
+    } catch (e) {
+      docStore.showToast(`Export failed: ${errorMessage(e)}`);
+    }
+  }
 
   function goToPage(i: number) {
     canvas?.scrollToPage(i);
@@ -233,7 +279,10 @@
   });
 
   $effect(() => {
-    if (!docStore.doc) securityTab = null;
+    if (!docStore.doc) {
+      securityTab = null;
+      showEdit = false;
+    }
   });
   $effect(() => {
     const title = docStore.doc ? `${docStore.doc.modified ? "* " : ""}${docStore.doc.file_name} - Sheaf` : "Sheaf";
@@ -244,7 +293,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => (securityTab = t)} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (securityTab = t))} onEdit={() => ((securityTab = null), (showEdit = !showEdit))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
@@ -316,6 +365,8 @@
     </div>
     {#if securityTab && docStore.doc}
       <SecurityPanel initialTab={securityTab} onClose={() => (securityTab = null)} />
+    {:else if showEdit && docStore.doc}
+      <EditPanel onClose={() => (showEdit = false)} />
     {/if}
   </div>
 </div>

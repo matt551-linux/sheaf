@@ -119,6 +119,8 @@ class DocumentStore {
   signatures = $state<SignatureInfo[]>([]);
   /** While set, the next drag on a page places a signature there. */
   placingSignature = $state<((page: number, rect: Rect) => void) | null>(null);
+  /** Object highlighted by the Edit panel (PDF coords). */
+  editHighlight = $state<{ page: number; rect: Rect } | null>(null);
 
   searchQuery = $state("");
   searchHits = $state<SearchHit[]>([]);

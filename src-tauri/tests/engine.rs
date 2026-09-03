@@ -727,3 +727,106 @@ fn m5_sign_save_reopen_annotate_keeps_signature() {
     e.close(info.id).unwrap();
     let _ = std::fs::remove_dir_all(&ids);
 }
+
+// ---------- M6: content editing ----------
+
+#[test]
+fn m6_edit_text_images_links_create_export() {
+    use sheaf_lib::edit::{ImageSpec, LinkSpec};
+    let e = engine();
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+
+    // Objects on page 1: at least one text run with the heading.
+    let objs = e.list_page_objects(id, 0).unwrap();
+    let text_objs: Vec<_> = objs.iter().filter(|o| o.kind == "text").collect();
+    assert!(!text_objs.is_empty(), "{objs:?}");
+    let heading = text_objs
+        .iter()
+        .find(|o| o.text.as_deref().map(|t| t.starts_with("Dumm")).unwrap_or(false))
+        .expect("heading text object (runs may split words)");
+    assert!(heading.font_size.unwrap() > 5.0);
+    assert!(heading.font.is_some());
+
+    // Edit the run's text and confirm the page text changed.
+    let info = e.set_text_object(id, 0, heading.index, "Edited by Sheaf".into(), None).unwrap();
+    assert!(info.can_undo);
+    let txt = e.text(id, 0).unwrap().text;
+    assert!(txt.contains("Edited by Sheaf"), "{txt}");
+    assert!(!txt.contains("Dumm"), "{txt}");
+
+    // Move it and confirm the bounds shifted.
+    let before = e.list_page_objects(id, 0).unwrap()[heading.index as usize].rect;
+    e.move_page_object(id, 0, heading.index, 50.0, -30.0, 1.0).unwrap();
+    let after = e.list_page_objects(id, 0).unwrap()[heading.index as usize].rect;
+    assert!((after.x - before.x - 50.0).abs() < 0.5 && (after.y - before.y + 30.0).abs() < 0.5, "{before:?} -> {after:?}");
+
+    // Insert a PNG image and see its pixels on the page.
+    let img_path = scratch("m6-red.png");
+    let img = image::RgbaImage::from_pixel(40, 20, image::Rgba([220, 20, 20, 255]));
+    img.save(&img_path).unwrap();
+    let n_before = e.list_page_objects(id, 0).unwrap().len();
+    e.insert_image(id, 0, ImageSpec { path: img_path.to_string_lossy().into_owned(), rect: Rect { x: 100.0, y: 100.0, w: 200.0, h: 0.0 } }).unwrap();
+    let objs = e.list_page_objects(id, 0).unwrap();
+    assert_eq!(objs.len(), n_before + 1);
+    let im = objs.iter().find(|o| o.kind == "image").unwrap();
+    assert_eq!((im.image_width, im.image_height), (Some(40), Some(20)));
+    assert!((im.rect.w - 200.0).abs() < 1.0 && (im.rect.h - 100.0).abs() < 1.0, "{:?}", im.rect);
+    let png = e.render(id, 0, 1.0, 0).unwrap();
+    let px = pixel(&png.png_base64, 200, png.height_px - 150);
+    assert!(px[0] > 180 && px[1] < 80, "expected red image pixel, got {px:?}");
+
+    // Extract that image back out as PNG.
+    let out_png = scratch("m6-extracted.png");
+    e.extract_image(id, 0, im.index, out_png.clone()).unwrap();
+    let back = image::open(&out_png).unwrap().into_rgba8();
+    assert_eq!(back.dimensions(), (40, 20));
+    assert!(back.get_pixel(5, 5).0[0] > 180);
+
+    // Delete the image.
+    e.delete_page_object(id, 0, im.index).unwrap();
+    assert_eq!(e.list_page_objects(id, 0).unwrap().len(), n_before);
+
+    // Add a brand-new text run in a standard font.
+    e.add_text(id, 0, sheaf_lib::edit::TextSpec { text: "Added run".into(), x: 72.0, y: 400.0, font: "Helvetica".into(), font_size: 14.0, color: Some(Color { r: 0, g: 0, b: 200 }) }).unwrap();
+    assert!(e.text(id, 0).unwrap().text.contains("Added run"));
+    assert!(e.list_page_objects(id, 0).unwrap().iter().any(|o| o.text.as_deref() == Some("Added run") && (o.rect.y - 400.0).abs() < 5.0));
+
+    // Links: add a URI link and read it back.
+    assert!(e.list_links(id, 0).unwrap().is_empty());
+    e.add_link(id, 0, LinkSpec { rect: Rect { x: 50.0, y: 700.0, w: 100.0, h: 20.0 }, uri: Some("https://example.org".into()), page: None }).unwrap();
+    let links = e.list_links(id, 0).unwrap();
+    assert_eq!(links.len(), 1, "{links:?}");
+    assert_eq!(links[0].uri.as_deref(), Some("https://example.org"));
+    assert!((links[0].rect.x - 50.0).abs() < 0.5);
+
+    // Save, reopen, edits and link persist.
+    let out = scratch("m6-edited.pdf");
+    e.save(id, SaveOptions { path: Some(out.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    e.close(id).unwrap();
+    let info = e.open(out, None).unwrap();
+    assert!(e.text(info.id, 0).unwrap().text.contains("Edited by Sheaf"));
+    assert_eq!(e.list_links(info.id, 0).unwrap().len(), 1);
+
+    // Export to images and text.
+    let dir = std::env::temp_dir().join("sheaf-tests").join("m6-export");
+    let files = e.export_images(info.id, vec![0], dir.clone(), 96.0).unwrap();
+    assert_eq!(files.len(), 1);
+    let exported = image::open(&files[0]).unwrap();
+    assert_eq!(exported.width(), (595.0f32 * 96.0 / 72.0).round() as u32);
+    let txt = e.export_text(info.id, vec![0]).unwrap();
+    assert!(txt.contains("Edited by Sheaf"));
+    e.close(info.id).unwrap();
+
+    // Create a PDF from two images.
+    let img2 = scratch("m6-blue.png");
+    image::RgbaImage::from_pixel(300, 150, image::Rgba([20, 20, 220, 255])).save(&img2).unwrap();
+    let created = scratch("m6-from-images.pdf");
+    let info = e.create_from_images(vec![img_path.clone(), img2.clone()], created.clone()).unwrap();
+    assert_eq!(info.page_count, 2);
+    assert!((info.pages[1].width - 300.0).abs() < 0.5 && (info.pages[1].height - 150.0).abs() < 0.5, "{:?}", info.pages[1]);
+    let png = e.render(info.id, 1, 1.0, 0).unwrap();
+    let px = pixel(&png.png_base64, 150, 75);
+    assert!(px[2] > 180 && px[0] < 80, "expected blue, got {px:?}");
+    e.close(info.id).unwrap();
+}

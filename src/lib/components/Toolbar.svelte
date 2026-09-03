@@ -15,8 +15,12 @@
     onValidateForm: () => void;
     onOrganize: () => void;
     onSecurity: (tab: "sign" | "signatures" | "protect") => void;
+    onEdit: () => void;
+    onCreateFromImages: () => void;
+    onExportImages: () => void;
+    onExportText: () => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity, onEdit, onCreateFromImages, onExportImages, onExportText }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -81,11 +85,15 @@
     <Menu label="File">
       {#snippet children(close)}
         <button class={item} role="menuitem" onclick={() => (close(), onOpen())}>Open… <span class="text-xs text-neutral-400">Ctrl+O</span></button>
+        <button class={item} role="menuitem" onclick={() => (close(), onCreateFromImages())}>Create PDF from images…</button>
         <button class={item} role="menuitem" disabled={!hasDoc || !docStore.doc?.modified} onclick={() => (close(), onSave())}>Save <span class="text-xs text-neutral-400">Ctrl+S</span></button>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onSaveAs())}>Save As… <span class="text-xs text-neutral-400">Ctrl+Shift+S</span></button>
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onPrint())}>Print… <span class="text-xs text-neutral-400">Ctrl+P</span></button>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onProperties())}>Properties… <span class="text-xs text-neutral-400">Ctrl+D</span></button>
+        <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onExportImages())}>Export pages as PNG…</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onExportText())}>Export text…</button>
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onValidateForm())}>Validate form</button>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onImportForm())}>Import form data…</button>
@@ -149,6 +157,7 @@
       title="Show or hide annotation tools"
     >Annotate</button>
     <button class={btn} disabled={!hasDoc} onclick={onOrganize} title="Reorder, rotate, delete, insert, extract, crop, and stamp pages">Organize</button>
+    <button class={btn} disabled={!hasDoc} onclick={onEdit} title="Edit text and images, add links">Edit</button>
     <button class={btn} disabled={!hasDoc} onclick={() => onSecurity("sign")} title="Digitally sign, verify signatures, password-protect">Sign &amp; protect</button>
 
     <span class="flex-1"></span>

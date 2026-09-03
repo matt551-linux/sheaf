@@ -5,3 +5,5 @@ pub mod engine;
 pub mod error;
 #[path = "../../src-tauri/src/security.rs"]
 pub mod security;
+#[path = "../../src-tauri/src/edit.rs"]
+pub mod edit;

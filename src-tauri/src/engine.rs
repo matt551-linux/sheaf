@@ -399,6 +399,19 @@ enum Request {
     ListSignatures(DocId, Sender<Result<Vec<crate::security::SignatureInfo>>>),
     Protect(DocId, crate::security::SecuritySpec, Sender<Result<DocumentInfo>>),
     Unprotect(DocId, Sender<Result<DocumentInfo>>),
+    // M6: edit
+    ListPageObjects(DocId, u16, Sender<Result<Vec<crate::edit::PageObject>>>),
+    SetTextObject(DocId, u16, u32, String, Option<f32>, Sender<Result<DocumentInfo>>),
+    MovePageObject(DocId, u16, u32, f32, f32, f32, Sender<Result<DocumentInfo>>),
+    DeletePageObject(DocId, u16, u32, Sender<Result<DocumentInfo>>),
+    InsertImage(DocId, u16, crate::edit::ImageSpec, Sender<Result<DocumentInfo>>),
+    AddText(DocId, u16, crate::edit::TextSpec, Sender<Result<DocumentInfo>>),
+    ExtractImage(DocId, u16, u32, PathBuf, Sender<Result<()>>),
+    ListLinks(DocId, u16, Sender<Result<Vec<crate::edit::LinkInfo>>>),
+    AddLink(DocId, u16, crate::edit::LinkSpec, Sender<Result<DocumentInfo>>),
+    CreateFromImages(Vec<PathBuf>, PathBuf, Sender<Result<DocumentInfo>>),
+    ExportImages(DocId, Vec<u16>, PathBuf, f32, Sender<Result<Vec<String>>>),
+    ExportText(DocId, Vec<u16>, Sender<Result<String>>),
 }
 
 #[derive(Clone)]
@@ -588,6 +601,42 @@ impl Engine {
     pub fn unprotect(&self, id: DocId) -> Result<DocumentInfo> {
         self.call(|r| Request::Unprotect(id, r))
     }
+    pub fn list_page_objects(&self, id: DocId, page: u16) -> Result<Vec<crate::edit::PageObject>> {
+        self.call(|r| Request::ListPageObjects(id, page, r))
+    }
+    pub fn set_text_object(&self, id: DocId, page: u16, obj: u32, text: String, font_size: Option<f32>) -> Result<DocumentInfo> {
+        self.call(|r| Request::SetTextObject(id, page, obj, text, font_size, r))
+    }
+    pub fn move_page_object(&self, id: DocId, page: u16, obj: u32, dx: f32, dy: f32, scale: f32) -> Result<DocumentInfo> {
+        self.call(|r| Request::MovePageObject(id, page, obj, dx, dy, scale, r))
+    }
+    pub fn delete_page_object(&self, id: DocId, page: u16, obj: u32) -> Result<DocumentInfo> {
+        self.call(|r| Request::DeletePageObject(id, page, obj, r))
+    }
+    pub fn insert_image(&self, id: DocId, page: u16, spec: crate::edit::ImageSpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::InsertImage(id, page, spec, r))
+    }
+    pub fn add_text(&self, id: DocId, page: u16, spec: crate::edit::TextSpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::AddText(id, page, spec, r))
+    }
+    pub fn extract_image(&self, id: DocId, page: u16, obj: u32, path: PathBuf) -> Result<()> {
+        self.call(|r| Request::ExtractImage(id, page, obj, path, r))
+    }
+    pub fn list_links(&self, id: DocId, page: u16) -> Result<Vec<crate::edit::LinkInfo>> {
+        self.call(|r| Request::ListLinks(id, page, r))
+    }
+    pub fn add_link(&self, id: DocId, page: u16, spec: crate::edit::LinkSpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::AddLink(id, page, spec, r))
+    }
+    pub fn create_from_images(&self, paths: Vec<PathBuf>, out: PathBuf) -> Result<DocumentInfo> {
+        self.call(|r| Request::CreateFromImages(paths, out, r))
+    }
+    pub fn export_images(&self, id: DocId, pages: Vec<u16>, dir: PathBuf, dpi: f32) -> Result<Vec<String>> {
+        self.call(|r| Request::ExportImages(id, pages, dir, dpi, r))
+    }
+    pub fn export_text(&self, id: DocId, pages: Vec<u16>) -> Result<String> {
+        self.call(|r| Request::ExportText(id, pages, r))
+    }
 }
 
 fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindings>> {
@@ -603,16 +652,16 @@ fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindin
 
 const MAX_UNDO: usize = 40;
 
-struct OpenDoc {
+pub(crate) struct OpenDoc {
     /// The bytes PDFium is reading from. Must outlive `handle`.
-    bytes: Vec<u8>,
-    handle: FPDF_DOCUMENT,
-    form: FPDF_FORMHANDLE,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) handle: FPDF_DOCUMENT,
+    pub(crate) form: FPDF_FORMHANDLE,
     /// PDFium keeps a raw pointer to this for the life of `form`; it must not move or drop first.
     #[allow(dead_code)]
     form_info: Box<FPDF_FORMFILLINFO>,
-    path: PathBuf,
-    password: Option<String>,
+    pub(crate) path: PathBuf,
+    pub(crate) password: Option<String>,
     /// Serialized document state before each mutation (for undo).
     undo: Vec<Vec<u8>>,
     redo: Vec<Vec<u8>>,
@@ -623,17 +672,17 @@ struct OpenDoc {
     authoritative: bool,
 }
 
-struct EngineState {
-    b: Box<dyn PdfiumLibraryBindings>,
+pub(crate) struct EngineState {
+    pub(crate) b: Box<dyn PdfiumLibraryBindings>,
     docs: HashMap<DocId, OpenDoc>,
     next_id: DocId,
 }
 
 /// RAII page handle with the form environment notified.
-struct PageGuard<'a> {
+pub(crate) struct PageGuard<'a> {
     b: &'a dyn PdfiumLibraryBindings,
     form: FPDF_FORMHANDLE,
-    page: FPDF_PAGE,
+    pub(crate) page: FPDF_PAGE,
 }
 impl Drop for PageGuard<'_> {
     fn drop(&mut self) {
@@ -646,9 +695,9 @@ impl Drop for PageGuard<'_> {
     }
 }
 
-struct TextGuard<'a> {
+pub(crate) struct TextGuard<'a> {
     b: &'a dyn PdfiumLibraryBindings,
-    tp: FPDF_TEXTPAGE,
+    pub(crate) tp: FPDF_TEXTPAGE,
 }
 impl Drop for TextGuard<'_> {
     fn drop(&mut self) {
@@ -757,13 +806,49 @@ impl EngineState {
             Request::Unprotect(id, r) => {
                 let _ = r.send(self.unprotect(id));
             }
+            Request::ListPageObjects(id, p, r) => {
+                let _ = r.send(self.list_page_objects(id, p));
+            }
+            Request::SetTextObject(id, p, o, t, fs, r) => {
+                let _ = r.send(self.set_text_object(id, p, o, t, fs));
+            }
+            Request::MovePageObject(id, p, o, dx, dy, sc, r) => {
+                let _ = r.send(self.move_page_object(id, p, o, dx, dy, sc));
+            }
+            Request::DeletePageObject(id, p, o, r) => {
+                let _ = r.send(self.delete_page_object(id, p, o));
+            }
+            Request::InsertImage(id, p, spec, r) => {
+                let _ = r.send(self.insert_image(id, p, &spec));
+            }
+            Request::AddText(id, p, spec, r) => {
+                let _ = r.send(self.add_text(id, p, &spec));
+            }
+            Request::ExtractImage(id, p, o, path, r) => {
+                let _ = r.send(self.extract_image(id, p, o, &path));
+            }
+            Request::ListLinks(id, p, r) => {
+                let _ = r.send(self.list_links(id, p));
+            }
+            Request::AddLink(id, p, spec, r) => {
+                let _ = r.send(self.add_link(id, p, &spec));
+            }
+            Request::CreateFromImages(paths, out, r) => {
+                let _ = r.send(self.create_from_images(&paths, &out));
+            }
+            Request::ExportImages(id, pages, dir, dpi, r) => {
+                let _ = r.send(self.export_images(id, &pages, &dir, dpi));
+            }
+            Request::ExportText(id, pages, r) => {
+                let _ = r.send(self.export_text(id, &pages));
+            }
             Request::StampPages(id, spec, r) => {
                 let _ = r.send(self.stamp_pages(id, &spec));
             }
         }
     }
 
-    fn doc(&self, id: DocId) -> Result<&OpenDoc> {
+    pub(crate) fn doc(&self, id: DocId) -> Result<&OpenDoc> {
         self.docs.get(&id).ok_or(SheafError::NoSuchDocument(id))
     }
     fn doc_mut(&mut self, id: DocId) -> Result<&mut OpenDoc> {
@@ -814,7 +899,7 @@ impl EngineState {
         drop(d.bytes);
     }
 
-    fn open(&mut self, path: PathBuf, password: Option<String>) -> Result<DocumentInfo> {
+    pub(crate) fn open(&mut self, path: PathBuf, password: Option<String>) -> Result<DocumentInfo> {
         let bytes = std::fs::read(&path)?;
         let (bytes, handle, form, form_info) = self.load(bytes, password.as_deref())?;
         let id = self.next_id;
@@ -837,7 +922,7 @@ impl EngineState {
         self.info(id)
     }
 
-    fn page(&self, d: &OpenDoc, index: u16) -> Result<PageGuard<'_>> {
+    pub(crate) fn page(&self, d: &OpenDoc, index: u16) -> Result<PageGuard<'_>> {
         let page = unsafe { self.b.FPDF_LoadPage(d.handle, index as i32) };
         if page.is_null() {
             return Err(SheafError::NoSuchPage(index));
@@ -868,7 +953,7 @@ impl EngineState {
         }
     }
 
-    fn info(&self, id: DocId) -> Result<DocumentInfo> {
+    pub(crate) fn info(&self, id: DocId) -> Result<DocumentInfo> {
         let d = self.doc(id)?;
         let b = &self.b;
         let count = unsafe { b.FPDF_GetPageCount(d.handle) }.max(0) as u16;
@@ -949,7 +1034,7 @@ impl EngineState {
 
     // ----- rendering -----
 
-    fn render(&self, id: DocId, index: u16, scale: f32, rotation: u16) -> Result<RenderedPage> {
+    pub(crate) fn render(&self, id: DocId, index: u16, scale: f32, rotation: u16) -> Result<RenderedPage> {
         let d = self.doc(id)?;
         let b = &self.b;
         let p = self.page(d, index)?;
@@ -1009,7 +1094,7 @@ impl EngineState {
 
     // ----- text -----
 
-    fn text_page<'a>(&'a self, p: &PageGuard<'_>) -> Result<TextGuard<'a>> {
+    pub(crate) fn text_page<'a>(&'a self, p: &PageGuard<'_>) -> Result<TextGuard<'a>> {
         let tp = unsafe { self.b.FPDFText_LoadPage(p.page) };
         if tp.is_null() {
             return Err(SheafError::Pdf("text layer unavailable".into()));
@@ -1047,7 +1132,7 @@ impl EngineState {
         (text, chars)
     }
 
-    fn page_text(&self, id: DocId, index: u16) -> Result<PageText> {
+    pub(crate) fn page_text(&self, id: DocId, index: u16) -> Result<PageText> {
         let d = self.doc(id)?;
         let p = self.page(d, index)?;
         let t = self.text_page(&p)?;
@@ -1267,7 +1352,7 @@ impl EngineState {
     }
 
     /// Serialize the current document to bytes (full rewrite, no incremental section).
-    fn snapshot(&self, handle: FPDF_DOCUMENT, flags: u32) -> Result<Vec<u8>> {
+    pub(crate) fn snapshot(&self, handle: FPDF_DOCUMENT, flags: u32) -> Result<Vec<u8>> {
         // `base` must be the first field so PDFium's `pThis` pointer can be
         // cast back to the whole Writer.
         #[repr(C)]
@@ -1321,7 +1406,7 @@ impl EngineState {
     }
 
     /// Push the current state to the undo stack before a mutation.
-    fn checkpoint(&mut self, id: DocId) -> Result<()> {
+    pub(crate) fn checkpoint(&mut self, id: DocId) -> Result<()> {
         let snap = {
             let d = self.doc(id)?;
             self.serialize(d)?
