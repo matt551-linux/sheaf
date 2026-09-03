@@ -1,0 +1,23 @@
+# Cross-target type check of the PDFium engine without Tauri (no GTK/objc build
+# scripts), so a Windows dev box can catch c_ulong (32-bit on Windows, 64-bit on
+# Linux/macOS) mismatches before CI does:
+#   cargo check --manifest-path scripts/xcheck-engine/Cargo.toml --target x86_64-unknown-linux-gnu
+[package]
+name = "sheaf-xcheck-engine"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+pdfium-render = { version = "0.9", default-features = false, features = ["image_025", "pdfium_7543", "thread_safe"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+parking_lot = "0.12"
+base64 = "0.22"
+
+[workspace]

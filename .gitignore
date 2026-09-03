@@ -14,3 +14,4 @@ src-tauri/pdfium/
 src-tauri/resources/*
 !src-tauri/resources/.gitkeep
 .hermes/
+scripts/xcheck-engine/target/

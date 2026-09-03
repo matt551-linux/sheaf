@@ -745,7 +745,7 @@ impl EngineState {
     )> {
         let handle = unsafe { self.b.FPDF_LoadMemDocument64(&bytes, password) };
         if handle.is_null() {
-            let err = unsafe { self.b.FPDF_GetLastError() };
+            let err = unsafe { self.b.FPDF_GetLastError() } as u32;
             return Err(if err == FPDF_ERR_PASSWORD {
                 SheafError::PasswordRequired
             } else {
@@ -757,7 +757,7 @@ impl EngineState {
         let form = unsafe { self.b.FPDFDOC_InitFormFillEnvironment(handle, &mut *info) };
         if !form.is_null() {
             unsafe {
-                self.b.FPDF_SetFormFieldHighlightColor(form, 0, 0xE4F0FF);
+                self.b.FPDF_SetFormFieldHighlightColor(form, 0, 0xE4F0FF as std::os::raw::c_ulong);
                 self.b.FPDF_SetFormFieldHighlightAlpha(form, 100);
             }
         }
@@ -898,7 +898,7 @@ impl EngineState {
             file_size: d.bytes.len() as u64,
             pdf_version: version,
             encrypted,
-            permissions: unsafe { b.FPDF_GetDocPermissions(d.handle) },
+            permissions: unsafe { b.FPDF_GetDocPermissions(d.handle) } as u32,
             attachments,
             modified: d.modified,
             can_undo: !d.undo.is_empty(),
@@ -927,7 +927,7 @@ impl EngineState {
         }
         let flags = (FPDF_ANNOT | FPDF_LCD_TEXT) as i32;
         unsafe {
-            b.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xFFFFFFFF);
+            b.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xFFFFFFFF as std::os::raw::c_ulong);
             b.FPDF_RenderPageBitmap(bmp, p.page, 0, 0, w, h, rot, flags);
             if !d.form.is_null() {
                 b.FPDF_FFLDraw(d.form, bmp, p.page, 0, 0, w, h, rot, flags);
@@ -1030,7 +1030,7 @@ impl EngineState {
             let Ok(t) = self.text_page(&p) else { continue };
             let (text, chars) = self.chars_of(t.tp);
             let text_chars: Vec<char> = text.chars().collect();
-            let sh = unsafe { b.FPDFText_FindStart(t.tp, needle.as_ptr(), flags, 0) };
+            let sh = unsafe { b.FPDFText_FindStart(t.tp, needle.as_ptr(), flags as std::os::raw::c_ulong, 0) };
             if sh.is_null() {
                 continue;
             }
@@ -1253,7 +1253,7 @@ impl EngineState {
         };
         let ok = unsafe {
             self.b
-                .FPDF_SaveAsCopy(handle, &mut w.base as *mut FPDF_FILEWRITE, flags)
+                .FPDF_SaveAsCopy(handle, &mut w.base as *mut FPDF_FILEWRITE, flags as std::os::raw::c_ulong)
         };
         if ok == 0 {
             return Err(SheafError::Pdf(
