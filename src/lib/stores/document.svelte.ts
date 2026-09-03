@@ -121,6 +121,8 @@ class DocumentStore {
   placingSignature = $state<((page: number, rect: Rect) => void) | null>(null);
   /** Object highlighted by the Edit panel (PDF coords). */
   editHighlight = $state<{ page: number; rect: Rect } | null>(null);
+  /** Pending redaction marks (not yet applied), by page. */
+  redactMarks = $state<Record<number, Rect[]>>({});
 
   searchQuery = $state("");
   searchHits = $state<SearchHit[]>([]);

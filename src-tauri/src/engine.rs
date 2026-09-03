@@ -412,6 +412,13 @@ enum Request {
     CreateFromImages(Vec<PathBuf>, PathBuf, Sender<Result<DocumentInfo>>),
     ExportImages(DocId, Vec<u16>, PathBuf, f32, Sender<Result<Vec<String>>>),
     ExportText(DocId, Vec<u16>, Sender<Result<String>>),
+    // M7: tools
+    Redact(DocId, crate::tools::RedactSpec, Sender<Result<DocumentInfo>>),
+    RedactSearch(DocId, String, bool, bool, Sender<Result<Vec<(u16, Rect)>>>),
+    CompareText(DocId, DocId, Sender<Result<crate::tools::CompareResult>>),
+    CompareVisual(DocId, DocId, u16, f32, Sender<Result<RenderedPage>>),
+    Ocr(DocId, Vec<u16>, PathBuf, f32, Sender<Result<crate::tools::OcrResult>>),
+    Accessibility(DocId, Sender<Result<crate::tools::AccessibilityReport>>),
 }
 
 #[derive(Clone)]
@@ -637,6 +644,24 @@ impl Engine {
     pub fn export_text(&self, id: DocId, pages: Vec<u16>) -> Result<String> {
         self.call(|r| Request::ExportText(id, pages, r))
     }
+    pub fn redact(&self, id: DocId, spec: crate::tools::RedactSpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::Redact(id, spec, r))
+    }
+    pub fn redact_search_rects(&self, id: DocId, query: String, case: bool, whole: bool) -> Result<Vec<(u16, Rect)>> {
+        self.call(|r| Request::RedactSearch(id, query, case, whole, r))
+    }
+    pub fn compare_text(&self, a: DocId, b: DocId) -> Result<crate::tools::CompareResult> {
+        self.call(|r| Request::CompareText(a, b, r))
+    }
+    pub fn compare_visual(&self, a: DocId, b: DocId, page: u16, scale: f32) -> Result<RenderedPage> {
+        self.call(|r| Request::CompareVisual(a, b, page, scale, r))
+    }
+    pub fn ocr_pages(&self, id: DocId, pages: Vec<u16>, models_dir: PathBuf, dpi: f32) -> Result<crate::tools::OcrResult> {
+        self.call(|r| Request::Ocr(id, pages, models_dir, dpi, r))
+    }
+    pub fn accessibility_report(&self, id: DocId) -> Result<crate::tools::AccessibilityReport> {
+        self.call(|r| Request::Accessibility(id, r))
+    }
 }
 
 fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindings>> {
@@ -841,6 +866,24 @@ impl EngineState {
             }
             Request::ExportText(id, pages, r) => {
                 let _ = r.send(self.export_text(id, &pages));
+            }
+            Request::Redact(id, spec, r) => {
+                let _ = r.send(self.redact(id, &spec));
+            }
+            Request::RedactSearch(id, q, c, w, r) => {
+                let _ = r.send(self.redact_search_rects(id, &q, c, w));
+            }
+            Request::CompareText(a, b, r) => {
+                let _ = r.send(self.compare_text(a, b));
+            }
+            Request::CompareVisual(a, b, p, sc, r) => {
+                let _ = r.send(self.compare_visual(a, b, p, sc));
+            }
+            Request::Ocr(id, pages, dir, dpi, r) => {
+                let _ = r.send(self.ocr_pages(id, &pages, &dir, dpi));
+            }
+            Request::Accessibility(id, r) => {
+                let _ = r.send(self.accessibility_report(id));
             }
             Request::StampPages(id, spec, r) => {
                 let _ = r.send(self.stamp_pages(id, &spec));
@@ -1105,7 +1148,7 @@ impl EngineState {
         })
     }
 
-    fn chars_of(&self, tp: FPDF_TEXTPAGE) -> (String, Vec<TextChar>) {
+    pub(crate) fn chars_of(&self, tp: FPDF_TEXTPAGE) -> (String, Vec<TextChar>) {
         let b = &self.b;
         let n = unsafe { b.FPDFText_CountChars(tp) }.max(0);
         let mut text = String::with_capacity(n as usize);
@@ -1140,7 +1183,7 @@ impl EngineState {
         Ok(PageText { index, text, chars })
     }
 
-    fn search(&self, id: DocId, query: &str, case: bool, whole: bool) -> Result<Vec<SearchHit>> {
+    pub(crate) fn search(&self, id: DocId, query: &str, case: bool, whole: bool) -> Result<Vec<SearchHit>> {
         let d = self.doc(id)?;
         let b = &self.b;
         if query.trim().is_empty() {
@@ -1184,7 +1227,7 @@ impl EngineState {
 
     // ----- outline and attachments -----
 
-    fn outline(&self, id: DocId) -> Result<Vec<OutlineNode>> {
+    pub(crate) fn outline(&self, id: DocId) -> Result<Vec<OutlineNode>> {
         let d = self.doc(id)?;
         let b = &self.b;
         fn walk(

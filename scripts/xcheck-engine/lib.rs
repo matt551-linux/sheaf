@@ -7,3 +7,5 @@ pub mod error;
 pub mod security;
 #[path = "../../src-tauri/src/edit.rs"]
 pub mod edit;
+#[path = "../../src-tauri/src/tools.rs"]
+pub mod tools;

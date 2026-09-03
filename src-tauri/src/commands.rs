@@ -8,6 +8,8 @@ use crate::engine::{
 };
 use crate::edit::{ImageSpec, LinkInfo, LinkSpec, PageObject, TextSpec};
 use crate::error::Result;
+use crate::tools::{AccessibilityReport, CompareResult, OcrResult, RedactSpec};
+use crate::engine::Rect;
 use crate::security::{Identity, IdentityStore, SecuritySpec, SignSpec, SignatureInfo};
 
 /// PDF paths passed on the command line (file association / "Open with").
@@ -423,4 +425,73 @@ pub async fn export_text(engine: State<'_, Engine>, id: u32, pages: Vec<u16>, pa
 #[tauri::command]
 pub async fn add_text(engine: State<'_, Engine>, id: u32, page: u16, spec: TextSpec) -> Result<DocumentInfo> {
     engine.add_text(id, page, spec)
+}
+
+// ---------- M7: tools ----------
+
+#[tauri::command]
+pub async fn redact(engine: State<'_, Engine>, id: u32, spec: RedactSpec) -> Result<DocumentInfo> {
+    engine.redact(id, spec)
+}
+
+#[derive(serde::Serialize)]
+pub struct RedactHit {
+    pub page: u16,
+    pub rect: Rect,
+}
+
+#[tauri::command]
+pub async fn redact_search(
+    engine: State<'_, Engine>,
+    id: u32,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Result<Vec<RedactHit>> {
+    Ok(engine
+        .redact_search_rects(id, query, case_sensitive, whole_word)?
+        .into_iter()
+        .map(|(page, rect)| RedactHit { page, rect })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn compare_text(engine: State<'_, Engine>, a: u32, b: u32) -> Result<CompareResult> {
+    engine.compare_text(a, b)
+}
+
+#[tauri::command]
+pub async fn compare_visual(engine: State<'_, Engine>, a: u32, b: u32, page: u16, scale: f32) -> Result<RenderedPage> {
+    engine.compare_visual(a, b, page, scale)
+}
+
+fn ocr_models_dir(app: &AppHandle) -> Result<std::path::PathBuf> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::error::SheafError::Engine(format!("app data dir: {e}")))?;
+    Ok(base.join("ocr-models"))
+}
+
+#[tauri::command]
+pub async fn ocr_models_ready(app: AppHandle) -> Result<bool> {
+    Ok(crate::tools::ocr_models_present(&ocr_models_dir(&app)?))
+}
+
+#[tauri::command]
+pub async fn ocr_download_models(app: AppHandle) -> Result<()> {
+    let dir = ocr_models_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || crate::tools::download_ocr_models(&dir))
+        .await
+        .map_err(|e| crate::error::SheafError::Engine(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn ocr_pages(app: AppHandle, engine: State<'_, Engine>, id: u32, pages: Vec<u16>, dpi: Option<f32>) -> Result<OcrResult> {
+    engine.ocr_pages(id, pages, ocr_models_dir(&app)?, dpi.unwrap_or(200.0))
+}
+
+#[tauri::command]
+pub async fn accessibility_report(engine: State<'_, Engine>, id: u32) -> Result<AccessibilityReport> {
+    engine.accessibility_report(id)
 }

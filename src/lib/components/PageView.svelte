@@ -335,6 +335,10 @@
         <rect x={live.x - 2} y={live.y - 2} width={live.w + 4} height={live.h + 4} fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3" />
       {/if}
     {/each}
+    {#each docStore.redactMarks[index] ?? [] as mr}
+      {@const rr = rectToCss(mr, size, zoom, rot)}
+      <rect x={rr.x} y={rr.y} width={rr.w} height={rr.h} fill="rgba(0,0,0,0.55)" stroke="#dc2626" stroke-width="1.5" />
+    {/each}
     {#if docStore.editHighlight && docStore.editHighlight.page === index}
       {@const hr = rectToCss(docStore.editHighlight.rect, size, zoom, rot)}
       <rect x={hr.x - 2} y={hr.y - 2} width={hr.w + 4} height={hr.h + 4} fill="rgba(37,99,235,0.12)" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3" />

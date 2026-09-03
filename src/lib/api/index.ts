@@ -273,6 +273,41 @@ export interface LinkInfo {
   page: number | null;
 }
 
+// ---------- M7: tools ----------
+
+export interface RedactHit {
+  page: number;
+  rect: Rect;
+}
+export interface DiffSegment {
+  kind: "equal" | "insert" | "delete";
+  text: string;
+}
+export interface PageDiff {
+  page: number;
+  inserted: number;
+  deleted: number;
+  segments: DiffSegment[];
+}
+export interface CompareResult {
+  pages: PageDiff[];
+  inserted: number;
+  deleted: number;
+}
+export interface OcrResult {
+  lines: number;
+  text: string;
+}
+export interface AccessibilityCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+export interface AccessibilityReport {
+  checks: AccessibilityCheck[];
+  issues: string[];
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -360,4 +395,15 @@ export const api = {
     invoke<string[]>("export_images", { id, pages, dir, dpi }),
   exportText: (id: number, pages: number[], path: string) =>
     invoke<void>("export_text", { id, pages, path }),
+  redact: (id: number, page: number, rects: Rect[], color: Color | null = null, removeAnnotations = true) =>
+    invoke<DocumentInfo>("redact", { id, spec: { page, rects, color, remove_annotations: removeAnnotations } }),
+  redactSearch: (id: number, query: string, caseSensitive = false, wholeWord = false) =>
+    invoke<RedactHit[]>("redact_search", { id, query, caseSensitive, wholeWord }),
+  compareText: (a: number, b: number) => invoke<CompareResult>("compare_text", { a, b }),
+  compareVisual: (a: number, b: number, page: number, scale = 1) =>
+    invoke<RenderedPage>("compare_visual", { a, b, page, scale }),
+  ocrModelsReady: () => invoke<boolean>("ocr_models_ready"),
+  ocrDownloadModels: () => invoke<void>("ocr_download_models"),
+  ocrPages: (id: number, pages: number[], dpi = 200) => invoke<OcrResult>("ocr_pages", { id, pages, dpi }),
+  accessibilityReport: (id: number) => invoke<AccessibilityReport>("accessibility_report", { id }),
 };

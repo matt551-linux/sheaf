@@ -3,7 +3,7 @@
 An open-source, cross-platform PDF reader and editor with the goal of near feature parity
 with Adobe Acrobat and a straightforward user experience.
 
-Status: early. Milestones 0 to 6 (reader, annotate and comment, forms, organize pages, sign and protect, edit) are working; CI builds installers for Windows, macOS, and Linux. See the roadmap below.
+Status: early. Milestones 0 to 7 (reader, annotate and comment, forms, organize pages, sign and protect, edit, redact/compare/OCR/accessibility) are working; CI builds installers for Windows, macOS, and Linux. See the roadmap below.
 
 ## Stack
 
@@ -51,7 +51,7 @@ pnpm check                                 # svelte-check / TypeScript
 | M4 | Organize pages: reorder, rotate, delete, insert, extract, crop, headers/footers, Bates, watermark | working |
 | M5 | Sign and protect: self-signed or imported (.p12) digital IDs, visible signatures, verification, DocMDP lock, AES-256 password and permissions | working |
 | M6 | Edit: edit, move, scale and delete text runs and images, add text and images, links, create PDF from images, export pages to PNG and text | working (Office/HTML import and DOCX/PDF-A export deferred) |
-| M7 | Redact, Compare, OCR, Accessibility tools | planned |
+| M7 | Redact (true content removal, by area or by search), Compare (word diff plus visual diff), OCR (local, ocrs models downloaded on demand), Accessibility checks | working |
 | M8 | Installers for all platforms (CI artifacts today), auto-update, localization, plugin API | in progress |
 
 Platform targets: Windows (x64, ARM64), macOS (universal), Linux (deb, rpm, AppImage, AUR).

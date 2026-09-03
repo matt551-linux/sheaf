@@ -16,11 +16,12 @@
     onOrganize: () => void;
     onSecurity: (tab: "sign" | "signatures" | "protect") => void;
     onEdit: () => void;
+    onTools: (tab: "redact" | "compare" | "ocr" | "access") => void;
     onCreateFromImages: () => void;
     onExportImages: () => void;
     onExportText: () => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity, onEdit, onCreateFromImages, onExportImages, onExportText }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity, onEdit, onTools, onCreateFromImages, onExportImages, onExportText }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -158,6 +159,14 @@
     >Annotate</button>
     <button class={btn} disabled={!hasDoc} onclick={onOrganize} title="Reorder, rotate, delete, insert, extract, crop, and stamp pages">Organize</button>
     <button class={btn} disabled={!hasDoc} onclick={onEdit} title="Edit text and images, add links">Edit</button>
+    <Menu label="Tools">
+      {#snippet children(close)}
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onTools("redact"))}>Redact…</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onTools("compare"))}>Compare with…</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onTools("ocr"))}>Recognise text (OCR)…</button>
+        <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onTools("access"))}>Accessibility check…</button>
+      {/snippet}
+    </Menu>
     <button class={btn} disabled={!hasDoc} onclick={() => onSecurity("sign")} title="Digitally sign, verify signatures, password-protect">Sign &amp; protect</button>
 
     <span class="flex-1"></span>

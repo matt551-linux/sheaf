@@ -3,6 +3,7 @@ pub mod edit;
 pub mod engine;
 mod error;
 pub mod security;
+pub mod tools;
 
 use std::path::PathBuf;
 
@@ -132,6 +133,14 @@ pub fn run() {
             commands::create_from_images,
             commands::export_images,
             commands::export_text,
+            commands::redact,
+            commands::redact_search,
+            commands::compare_text,
+            commands::compare_visual,
+            commands::ocr_models_ready,
+            commands::ocr_download_models,
+            commands::ocr_pages,
+            commands::accessibility_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

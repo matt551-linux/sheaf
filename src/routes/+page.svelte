@@ -12,6 +12,7 @@
   import OrganizeDialog from "$lib/components/OrganizeDialog.svelte";
   import SecurityPanel from "$lib/components/SecurityPanel.svelte";
   import EditPanel from "$lib/components/EditPanel.svelte";
+  import ToolsPanel from "$lib/components/ToolsPanel.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import { api, errorMessage, type Annotation } from "$lib/api";
@@ -24,6 +25,7 @@
   let showOrganize = $state(false);
   let securityTab = $state<"sign" | "signatures" | "protect" | null>(null);
   let showEdit = $state(false);
+  let toolsTab = $state<"redact" | "compare" | "ocr" | "access" | null>(null);
 
   async function createFromImages() {
     const picked = await open({ multiple: true, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff"] }] });
@@ -282,6 +284,8 @@
     if (!docStore.doc) {
       securityTab = null;
       showEdit = false;
+      toolsTab = null;
+      docStore.redactMarks = {};
     }
   });
   $effect(() => {
@@ -293,7 +297,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (securityTab = t))} onEdit={() => ((securityTab = null), (showEdit = !showEdit))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (toolsTab = null), (securityTab = t))} onEdit={() => ((securityTab = null), (toolsTab = null), (showEdit = !showEdit))} onTools={(t) => ((securityTab = null), (showEdit = false), (toolsTab = t))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
@@ -367,6 +371,8 @@
       <SecurityPanel initialTab={securityTab} onClose={() => (securityTab = null)} />
     {:else if showEdit && docStore.doc}
       <EditPanel onClose={() => (showEdit = false)} />
+    {:else if toolsTab && docStore.doc}
+      <ToolsPanel initialTab={toolsTab} onClose={() => (toolsTab = null)} />
     {/if}
   </div>
 </div>

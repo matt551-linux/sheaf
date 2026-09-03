@@ -37,6 +37,16 @@ x509-parser = "0.16"
 p12-keystore = "0.3"
 sha2 = "0.10"
 rand = "0.8"
+# M7 tools
+ocrs = { version = "0.13", default-features = false, features = ["rten"] }
+rten = "0.26"
+similar = "3"
+ureq = { version = "3", default-features = false, features = ["native-tls", "gzip"], optional = true }
+
+[features]
+default = ["ocr-download"]
+# Fetch OCR models over HTTPS (native TLS: SChannel / Security.framework / OpenSSL).
+ocr-download = ["dep:ureq"]
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

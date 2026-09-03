@@ -830,3 +830,80 @@ fn m6_edit_text_images_links_create_export() {
     assert!(px[2] > 180 && px[0] < 80, "expected blue, got {px:?}");
     e.close(info.id).unwrap();
 }
+
+// ---------- M7: redact, compare, OCR, accessibility ----------
+
+#[test]
+fn m7_redact_compare_accessibility_and_ocr() {
+    use sheaf_lib::tools::RedactSpec;
+    let e = engine();
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+
+    // Locate "Dummy" and redact it by search.
+    let hits = e.redact_search_rects(id, "Dummy".into(), false, false).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let (pg, r) = hits[0].clone();
+    // Add an annotation inside the box to prove it is removed too.
+    e.add_annotation(id, pg, spec_annot(AnnotKind::Square, Rect { x: r.x, y: r.y, w: 10.0, h: 5.0 })).unwrap();
+    assert_eq!(e.list_annotations(id, pg).unwrap().len(), 1);
+    let info = e.redact(id, RedactSpec { page: pg, rects: vec![r], color: None, remove_annotations: true }).unwrap();
+    assert!(info.can_undo);
+    let txt = e.text(id, pg).unwrap().text;
+    assert!(!txt.contains("Dummy"), "redacted text still present: {txt}");
+    assert!(txt.contains("PDF"), "unrelated text lost: {txt}");
+    assert!(e.list_annotations(id, pg).unwrap().is_empty());
+    // Black box painted where the word was.
+    let png = e.render(id, pg, 1.0, 0).unwrap();
+    let px = pixel(&png.png_base64, (r.x + r.w / 2.0) as u32, (png.height_px as f32 - (r.y + r.h / 2.0)) as u32);
+    assert!(px[0] < 40 && px[1] < 40 && px[2] < 40, "expected black, got {px:?}");
+    // Save and reopen: the text stays gone in the file itself.
+    let out = scratch("m7-redacted.pdf");
+    e.save(id, SaveOptions { path: Some(out.to_string_lossy().into_owned()), flatten: false }).unwrap();
+    let bytes = std::fs::read(&out).unwrap();
+    assert!(!bytes.windows(5).any(|w| w == b"Dummy"), "raw bytes still contain the word");
+
+    // Compare against the original.
+    let orig = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let cmp = e.compare_text(orig.id, id).unwrap();
+    assert_eq!(cmp.pages.len(), 1);
+    assert!(cmp.deleted >= 1, "{cmp:?}");
+    assert!(cmp.pages[0].segments.iter().any(|s| s.kind == "delete" && s.text.contains("Dummy")), "{:?}", cmp.pages[0].segments);
+    let vis = e.compare_visual(orig.id, id, 0, 1.0).unwrap();
+    let px = pixel(&vis.png_base64, (r.x + r.w / 2.0) as u32, (vis.height_px as f32 - (r.y + r.h / 2.0)) as u32);
+    assert!(px[1] > 120 && px[0] < 80, "expected green (only in B) at the box, got {px:?}");
+
+    // Accessibility report on the untagged sample.
+    let rep = e.accessibility_report(orig.id).unwrap();
+    assert!(rep.checks.iter().any(|c| c.name == "Tagged PDF" && !c.ok));
+    assert!(rep.checks.iter().any(|c| c.name == "Text on every page" && c.ok));
+    assert!(!rep.issues.is_empty());
+
+    // OCR: render the original page to an image-only PDF, then OCR it.
+    let models = std::env::var("SHEAF_OCR_MODELS").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("sheaf-ocr-models"));
+    if !sheaf_lib::tools::ocr_models_present(&models) {
+        if std::env::var("SHEAF_OCR_DOWNLOAD").is_err() {
+            eprintln!("skipping OCR: models not in {models:?} (set SHEAF_OCR_DOWNLOAD=1 to fetch)");
+            return;
+        }
+        sheaf_lib::tools::download_ocr_models(&models).unwrap();
+    }
+    let dir = std::env::temp_dir().join("sheaf-tests").join("m7-ocr");
+    let files = e.export_images(orig.id, vec![0], dir.clone(), 150.0).unwrap();
+    let scanned = scratch("m7-scan.pdf");
+    let sc = e.create_from_images(files.iter().map(PathBuf::from).collect(), scanned.clone()).unwrap();
+    assert!(e.text(sc.id, 0).unwrap().text.trim().is_empty(), "image-only page should have no text");
+    let rep = e.accessibility_report(sc.id).unwrap();
+    assert!(rep.checks.iter().any(|c| c.name == "Text on every page" && !c.ok));
+    let res = e.ocr_pages(sc.id, vec![0], models.clone(), 200.0).unwrap();
+    assert!(res.lines >= 1, "{res:?}");
+    assert!(res.text.to_lowercase().contains("dummy"), "OCR text: {}", res.text);
+    let txt = e.text(sc.id, 0).unwrap().text;
+    assert!(txt.to_lowercase().contains("dummy"), "page text after OCR: {txt}");
+    // The invisible text must not change the look: page still white where text was drawn.
+    let png = e.render(sc.id, 0, 1.0, 0).unwrap();
+    let px = pixel(&png.png_base64, 300, 300);
+    assert!(px[0] > 240, "OCR layer became visible: {px:?}");
+    let hits = e.search(sc.id, "dummy".into(), false, false).unwrap();
+    assert!(!hits.is_empty(), "OCR text is not searchable");
+}
