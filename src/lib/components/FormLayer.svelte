@@ -37,7 +37,34 @@
   }
 
   const fontPx = $derived(Math.max(9, 11 * zoom));
+
+  // Multi-select listboxes render as a dropdown button with a checkbox
+  // popup (a native multiple <select> is a big scroll box, which crowds
+  // the page). Tracks which field's popup is open.
+  let openList = $state<number | null>(null);
+  const CONTROL_H = 24; // px, dropdown button height at zoom 1
+
+  function toggleListOption(f: FormField, label: string) {
+    const sel = new Set(f.options.filter((o) => o.selected).map((o) => o.label));
+    if (sel.has(label)) sel.delete(label);
+    else sel.add(label);
+    void docStore.setFormField(index, f.annot_index, [...sel].join("\n"));
+  }
+  function listSummary(f: FormField): string {
+    const sel = f.options.filter((o) => o.selected).map((o) => o.label);
+    return sel.length ? sel.join(", ") : "—";
+  }
+  function onWindowPointer(e: PointerEvent) {
+    if (openList !== null && !(e.target as HTMLElement).closest("[data-listbox-popup]")) openList = null;
+  }
 </script>
+
+<svelte:window
+  onpointerdown={onWindowPointer}
+  onkeydown={(e) => {
+    if (e.key === "Escape") openList = null;
+  }}
+/>
 
 {#if docStore.formMode && fields.length}
   <div class="absolute inset-0" data-form-layer={index}>
@@ -109,22 +136,52 @@
           {/each}
         </select>
       {:else if f.kind === "listbox"}
-        <select
-          multiple={f.multiselect}
-          size={Math.max(2, f.options.length)}
-          class="absolute border border-blue-300/70 bg-[#eef3fd] text-neutral-900 focus:outline focus:outline-2 focus:outline-blue-500"
-          style="left:{r.x}px;top:{r.y}px;width:{r.w}px;height:{r.h}px;font-size:{fontPx}px"
-          disabled={f.readonly}
-          aria-label={f.alt_name || f.name}
-          onchange={(e) => {
-            const sel = [...(e.currentTarget as HTMLSelectElement).selectedOptions].map((o) => o.value);
-            void docStore.setFormField(index, f.annot_index, sel.join("\n"));
-          }}
-        >
-          {#each f.options as o}
-            <option value={o.label} selected={o.selected}>{o.label}</option>
-          {/each}
-        </select>
+        {#if f.multiselect}
+          {@const btnH = Math.min(r.h, CONTROL_H * zoom)}
+          <div data-listbox-popup class="absolute" style="left:{r.x}px;top:{r.y}px;width:{r.w}px">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-1 border border-blue-300/70 bg-[#eef3fd] px-1 text-left text-neutral-900 focus:outline focus:outline-2 focus:outline-blue-500"
+              style="height:{btnH}px;font-size:{fontPx}px"
+              disabled={f.readonly}
+              aria-label={f.alt_name || f.name}
+              aria-haspopup="listbox"
+              aria-expanded={openList === f.annot_index}
+              onclick={() => (openList = openList === f.annot_index ? null : f.annot_index)}
+            >
+              <span class="truncate">{listSummary(f)}</span>
+              <svg class="h-3 w-3 shrink-0 opacity-60" viewBox="0 0 12 12" fill="currentColor"><path d="M3 4.5l3 3 3-3z" /></svg>
+            </button>
+            {#if openList === f.annot_index}
+              <div
+                class="absolute left-0 z-30 mt-0.5 max-h-48 w-full min-w-28 overflow-auto rounded border border-neutral-300 bg-white py-0.5 shadow-lg"
+                style="top:{btnH}px;font-size:{fontPx}px"
+                role="listbox"
+                aria-multiselectable="true"
+              >
+                {#each f.options as o}
+                  <label class="flex cursor-pointer items-center gap-1.5 px-1.5 py-0.5 text-neutral-900 hover:bg-blue-50">
+                    <input type="checkbox" class="accent-blue-600" role="option" aria-selected={o.selected} checked={o.selected} onchange={() => toggleListOption(f, o.label)} />
+                    <span class="truncate">{o.label}</span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <select
+            class="absolute border border-blue-300/70 bg-[#eef3fd] text-neutral-900 focus:outline focus:outline-2 focus:outline-blue-500"
+            style="left:{r.x}px;top:{r.y}px;width:{r.w}px;height:{Math.min(r.h, CONTROL_H * zoom)}px;font-size:{fontPx}px"
+            disabled={f.readonly}
+            aria-label={f.alt_name || f.name}
+            onchange={(e) => void docStore.setFormField(index, f.annot_index, (e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#if !f.options.some((o) => o.selected)}<option value="" selected></option>{/if}
+            {#each f.options as o}
+              <option value={o.label} selected={o.selected}>{o.label}</option>
+            {/each}
+          </select>
+        {/if}
       {:else if f.kind === "signature"}
         <div
           class="absolute border border-dashed border-amber-400 bg-amber-50/30"
