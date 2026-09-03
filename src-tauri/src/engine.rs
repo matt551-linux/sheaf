@@ -154,6 +154,27 @@ pub struct FormFieldOption {
     pub selected: bool,
 }
 
+/// Text stamped onto pages: headers/footers, Bates numbering, or a diagonal
+/// watermark. `text` supports `{n}` (page number, honoring `start_at`),
+/// `{total}` (page count), and `{bates}` (zero-padded `start_at + i`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StampSpec {
+    /// Pages to stamp; empty = all pages.
+    pub pages: Vec<u16>,
+    pub text: String,
+    /// "header-left" | "header-center" | "header-right" |
+    /// "footer-left" | "footer-center" | "footer-right" | "watermark"
+    pub position: String,
+    pub font_size: f32,
+    pub color: Color,
+    /// 0-255; watermarks typically use a low value.
+    pub opacity: u8,
+    /// First value for {n}/{bates} numbering.
+    pub start_at: u32,
+    /// Zero-pad width for {bates} (e.g. 6 -> 000001).
+    pub bates_digits: u8,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FormField {
     pub page_index: u16,
@@ -358,6 +379,19 @@ enum Request {
     SetFormFieldValue(DocId, u16, u32, String, Sender<Result<FormField>>),
     ExportXfdf(DocId, Sender<Result<String>>),
     ImportXfdf(DocId, String, Sender<Result<u32>>),
+    RotatePages(DocId, Vec<u16>, i32, Sender<Result<DocumentInfo>>),
+    DeletePages(DocId, Vec<u16>, Sender<Result<DocumentInfo>>),
+    MovePages(DocId, Vec<u16>, u16, Sender<Result<DocumentInfo>>),
+    InsertPages(
+        DocId,
+        PathBuf,
+        Option<String>,
+        u16,
+        Sender<Result<DocumentInfo>>,
+    ),
+    ExtractPages(DocId, Vec<u16>, PathBuf, Sender<Result<()>>),
+    CropPages(DocId, Vec<u16>, [f32; 4], Sender<Result<DocumentInfo>>),
+    StampPages(DocId, StampSpec, Sender<Result<DocumentInfo>>),
 }
 
 #[derive(Clone)]
@@ -498,6 +532,38 @@ impl Engine {
     pub fn import_xfdf(&self, id: DocId, xfdf: String) -> Result<u32> {
         self.call(|r| Request::ImportXfdf(id, xfdf, r))
     }
+    /// Rotate pages by `delta` degrees (multiples of 90, may be negative).
+    pub fn rotate_pages(&self, id: DocId, pages: Vec<u16>, delta: i32) -> Result<DocumentInfo> {
+        self.call(|r| Request::RotatePages(id, pages, delta, r))
+    }
+    pub fn delete_pages(&self, id: DocId, pages: Vec<u16>) -> Result<DocumentInfo> {
+        self.call(|r| Request::DeletePages(id, pages, r))
+    }
+    /// Move `pages` (in their current order) so the block starts at `dest`.
+    pub fn move_pages(&self, id: DocId, pages: Vec<u16>, dest: u16) -> Result<DocumentInfo> {
+        self.call(|r| Request::MovePages(id, pages, dest, r))
+    }
+    /// Insert every page of the PDF at `path` before index `at`.
+    pub fn insert_pages(
+        &self,
+        id: DocId,
+        path: PathBuf,
+        password: Option<String>,
+        at: u16,
+    ) -> Result<DocumentInfo> {
+        self.call(|r| Request::InsertPages(id, path, password, at, r))
+    }
+    /// Write `pages` (in the given order) to a new PDF at `path`.
+    pub fn extract_pages(&self, id: DocId, pages: Vec<u16>, path: PathBuf) -> Result<()> {
+        self.call(|r| Request::ExtractPages(id, pages, path, r))
+    }
+    /// Set the crop box (PDF points, [left, bottom, right, top]) on pages.
+    pub fn crop_pages(&self, id: DocId, pages: Vec<u16>, box_: [f32; 4]) -> Result<DocumentInfo> {
+        self.call(|r| Request::CropPages(id, pages, box_, r))
+    }
+    pub fn stamp_pages(&self, id: DocId, spec: StampSpec) -> Result<DocumentInfo> {
+        self.call(|r| Request::StampPages(id, spec, r))
+    }
 }
 
 fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindings>> {
@@ -632,6 +698,27 @@ impl EngineState {
             }
             Request::ImportXfdf(id, x, r) => {
                 let _ = r.send(self.import_xfdf(id, &x));
+            }
+            Request::RotatePages(id, pages, delta, r) => {
+                let _ = r.send(self.rotate_pages(id, &pages, delta));
+            }
+            Request::DeletePages(id, pages, r) => {
+                let _ = r.send(self.delete_pages(id, &pages));
+            }
+            Request::MovePages(id, pages, dest, r) => {
+                let _ = r.send(self.move_pages(id, &pages, dest));
+            }
+            Request::InsertPages(id, path, pw, at, r) => {
+                let _ = r.send(self.insert_pages(id, &path, pw.as_deref(), at));
+            }
+            Request::ExtractPages(id, pages, path, r) => {
+                let _ = r.send(self.extract_pages(id, &pages, &path));
+            }
+            Request::CropPages(id, pages, bx, r) => {
+                let _ = r.send(self.crop_pages(id, &pages, bx));
+            }
+            Request::StampPages(id, spec, r) => {
+                let _ = r.send(self.stamp_pages(id, &spec));
             }
         }
     }
@@ -1860,6 +1947,231 @@ impl EngineState {
             }
         }
         result
+    }
+
+    // ----- page organization -----
+
+    fn info_after_pagechange(&mut self, id: DocId) -> Result<DocumentInfo> {
+        // Widget caches inside the form environment can go stale across
+        // structural changes; reload from a snapshot to be safe.
+        let bytes = {
+            let d = self.doc(id)?;
+            self.snapshot(d.handle, FPDF_NO_INCREMENTAL)?
+        };
+        self.reload(id, bytes)?;
+        self.info(id)
+    }
+
+    fn rotate_pages(&mut self, id: DocId, pages: &[u16], delta: i32) -> Result<DocumentInfo> {
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        let b = &self.b;
+        let steps = delta.div_euclid(90).rem_euclid(4);
+        for &i in pages {
+            let p = self.page(d, i)?;
+            let cur = unsafe { b.FPDFPage_GetRotation(p.page) };
+            unsafe { b.FPDFPage_SetRotation(p.page, (cur + steps).rem_euclid(4)) };
+        }
+        self.info_after_pagechange(id)
+    }
+
+    fn delete_pages(&mut self, id: DocId, pages: &[u16]) -> Result<DocumentInfo> {
+        let count = unsafe { self.b.FPDF_GetPageCount(self.doc(id)?.handle) } as usize;
+        if pages.len() >= count {
+            return Err(SheafError::Pdf("cannot delete every page".into()));
+        }
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        let mut sorted: Vec<u16> = pages.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        // Delete from the back so earlier indices stay valid.
+        for &i in sorted.iter().rev() {
+            unsafe { self.b.FPDFPage_Delete(d.handle, i as i32) };
+        }
+        self.info_after_pagechange(id)
+    }
+
+    fn move_pages(&mut self, id: DocId, pages: &[u16], dest: u16) -> Result<DocumentInfo> {
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        let idx: Vec<std::os::raw::c_int> = pages.iter().map(|&p| p as i32).collect();
+        let ok = unsafe {
+            self.b.FPDF_MovePages(
+                d.handle,
+                idx.as_ptr(),
+                idx.len() as std::os::raw::c_ulong,
+                dest as i32,
+            )
+        };
+        if ok == 0 {
+            // Roll the checkpoint back so a failed move is not an undo step.
+            let d = self.doc_mut(id)?;
+            d.undo.pop();
+            return Err(SheafError::Pdf("could not move pages".into()));
+        }
+        self.info_after_pagechange(id)
+    }
+
+    fn insert_pages(
+        &mut self,
+        id: DocId,
+        path: &Path,
+        password: Option<&str>,
+        at: u16,
+    ) -> Result<DocumentInfo> {
+        let bytes = std::fs::read(path)?;
+        self.checkpoint(id)?;
+        let b = &self.b;
+        // Load the source document directly (no form environment needed).
+        let src = unsafe { b.FPDF_LoadMemDocument64(&bytes, password) };
+        if src.is_null() {
+            let err = unsafe { b.FPDF_GetLastError() } as u32;
+            let d = self.doc_mut(id)?;
+            d.undo.pop();
+            return Err(if err == FPDF_ERR_PASSWORD {
+                SheafError::PasswordRequired
+            } else {
+                SheafError::Pdf(format!("could not open {} (error {err})", path.display()))
+            });
+        }
+        let d = self.doc(id)?;
+        let n = unsafe { b.FPDF_GetPageCount(src) };
+        let indices: Vec<std::os::raw::c_int> = (0..n).collect();
+        let ok = unsafe {
+            b.FPDF_ImportPagesByIndex(
+                d.handle,
+                src,
+                indices.as_ptr(),
+                indices.len() as std::os::raw::c_ulong,
+                at as i32,
+            )
+        };
+        unsafe { b.FPDF_CloseDocument(src) };
+        if ok == 0 {
+            let d = self.doc_mut(id)?;
+            d.undo.pop();
+            return Err(SheafError::Pdf("could not import pages".into()));
+        }
+        self.info_after_pagechange(id)
+    }
+
+    fn extract_pages(&self, id: DocId, pages: &[u16], path: &Path) -> Result<()> {
+        let d = self.doc(id)?;
+        let b = &self.b;
+        let dest = unsafe { b.FPDF_CreateNewDocument() };
+        if dest.is_null() {
+            return Err(SheafError::Pdf("could not create destination".into()));
+        }
+        let idx: Vec<std::os::raw::c_int> = pages.iter().map(|&p| p as i32).collect();
+        let ok = unsafe {
+            b.FPDF_ImportPagesByIndex(
+                dest,
+                d.handle,
+                idx.as_ptr(),
+                idx.len() as std::os::raw::c_ulong,
+                0,
+            )
+        };
+        if ok == 0 {
+            unsafe { b.FPDF_CloseDocument(dest) };
+            return Err(SheafError::Pdf("could not copy pages".into()));
+        }
+        let bytes = self.snapshot(dest, FPDF_NO_INCREMENTAL);
+        unsafe { b.FPDF_CloseDocument(dest) };
+        std::fs::write(path, bytes?)?;
+        Ok(())
+    }
+
+    fn crop_pages(&mut self, id: DocId, pages: &[u16], bx: [f32; 4]) -> Result<DocumentInfo> {
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        let b = &self.b;
+        for &i in pages {
+            let p = self.page(d, i)?;
+            unsafe { b.FPDFPage_SetCropBox(p.page, bx[0], bx[1], bx[2], bx[3]) };
+        }
+        self.info_after_pagechange(id)
+    }
+
+    fn stamp_pages(&mut self, id: DocId, spec: &StampSpec) -> Result<DocumentInfo> {
+        self.checkpoint(id)?;
+        let d = self.doc(id)?;
+        let b = &self.b;
+        let total = unsafe { b.FPDF_GetPageCount(d.handle) } as u16;
+        let targets: Vec<u16> = if spec.pages.is_empty() {
+            (0..total).collect()
+        } else {
+            spec.pages.to_vec()
+        };
+        let margin = 28.0f32; // 28pt from the page edge (a bit under 1cm)
+        for (i, &page_index) in targets.iter().enumerate() {
+            let p = self.page(d, page_index)?;
+            let (mut l, mut bo, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
+            let got = unsafe { b.FPDFPage_GetCropBox(p.page, &mut l, &mut bo, &mut r, &mut t) };
+            if got == 0 {
+                unsafe { b.FPDFPage_GetMediaBox(p.page, &mut l, &mut bo, &mut r, &mut t) };
+            }
+            let (w, h) = (r - l, t - bo);
+            let n = spec.start_at + i as u32;
+            let text = spec
+                .text
+                .replace("{n}", &n.to_string())
+                .replace("{total}", &total.to_string())
+                .replace(
+                    "{bates}",
+                    &format!("{:0width$}", n, width = spec.bates_digits.max(1) as usize),
+                );
+            let obj = unsafe { b.FPDFPageObj_NewTextObj(d.handle, "Helvetica", spec.font_size) };
+            if obj.is_null() {
+                return Err(SheafError::Pdf("could not create text object".into()));
+            }
+            unsafe {
+                b.FPDFText_SetText_str(obj, &text);
+                b.FPDFPageObj_SetFillColor(
+                    obj,
+                    spec.color.r as u32,
+                    spec.color.g as u32,
+                    spec.color.b as u32,
+                    spec.opacity as u32,
+                );
+            }
+            // Rough text width for centering: Helvetica averages ~0.5em/char.
+            let text_w = text.chars().count() as f32 * spec.font_size * 0.5;
+            let (x, y, rotate) = match spec.position.as_str() {
+                "header-left" => (l + margin, t - margin, false),
+                "header-center" => (l + (w - text_w) / 2.0, t - margin, false),
+                "header-right" => (r - margin - text_w, t - margin, false),
+                "footer-left" => (l + margin, bo + margin - spec.font_size, false),
+                "footer-center" => (l + (w - text_w) / 2.0, bo + margin - spec.font_size, false),
+                "footer-right" => (r - margin - text_w, bo + margin - spec.font_size, false),
+                "watermark" => (l + w / 2.0, bo + h / 2.0, true),
+                other => {
+                    return Err(SheafError::Pdf(format!("unknown stamp position {other}")));
+                }
+            };
+            unsafe {
+                if rotate {
+                    // 45-degree diagonal centered on the page.
+                    let (s, c) = (45f32.to_radians().sin(), 45f32.to_radians().cos());
+                    let (hx, hy) = (text_w / 2.0, spec.font_size / 2.0);
+                    b.FPDFPageObj_Transform(
+                        obj,
+                        c as f64,
+                        s as f64,
+                        (-s) as f64,
+                        c as f64,
+                        (x - hx * c + hy * s) as f64,
+                        (y - hx * s - hy * c) as f64,
+                    );
+                } else {
+                    b.FPDFPageObj_Transform(obj, 1.0, 0.0, 0.0, 1.0, x as f64, y as f64);
+                }
+                b.FPDFPage_InsertObject(p.page, obj);
+                b.FPDFPage_GenerateContent(p.page);
+            }
+        }
+        self.info_after_pagechange(id)
     }
 
     // ----- save -----

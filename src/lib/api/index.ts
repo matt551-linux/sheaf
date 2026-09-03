@@ -159,6 +159,26 @@ export interface FormFieldOption {
   selected: boolean;
 }
 
+export interface StampSpec {
+  /** Pages to stamp; empty = all. */
+  pages: number[];
+  /** Supports {n}, {total}, {bates}. */
+  text: string;
+  position:
+    | "header-left"
+    | "header-center"
+    | "header-right"
+    | "footer-left"
+    | "footer-center"
+    | "footer-right"
+    | "watermark";
+  font_size: number;
+  color: Color;
+  opacity: number;
+  start_at: number;
+  bates_digits: number;
+}
+
 export interface FormField {
   page_index: number;
   annot_index: number;
@@ -218,4 +238,16 @@ export const api = {
     invoke<FormField>("set_form_field_value", { id, page, annotIndex, value }),
   exportXfdf: (id: number, path: string) => invoke<void>("export_xfdf", { id, path }),
   importXfdf: (id: number, path: string) => invoke<number>("import_xfdf", { id, path }),
+  rotatePages: (id: number, pages: number[], delta: number) =>
+    invoke<DocumentInfo>("rotate_pages", { id, pages, delta }),
+  deletePages: (id: number, pages: number[]) => invoke<DocumentInfo>("delete_pages", { id, pages }),
+  movePages: (id: number, pages: number[], dest: number) =>
+    invoke<DocumentInfo>("move_pages", { id, pages, dest }),
+  insertPages: (id: number, path: string, at: number, password?: string) =>
+    invoke<DocumentInfo>("insert_pages", { id, path, at, password }),
+  extractPages: (id: number, pages: number[], path: string) =>
+    invoke<void>("extract_pages", { id, pages, path }),
+  cropPages: (id: number, pages: number[], cropBox: [number, number, number, number]) =>
+    invoke<DocumentInfo>("crop_pages", { id, pages, cropBox }),
+  stampPages: (id: number, spec: StampSpec) => invoke<DocumentInfo>("stamp_pages", { id, spec }),
 };

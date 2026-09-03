@@ -457,28 +457,44 @@ class DocumentStore {
     if (s) await this.deleteAnnotation(s.page, s.index);
   }
 
+  private historyBusy = false;
   async undo() {
-    if (!this.doc?.can_undo) return;
-    const info = await api.undo(this.doc.id).catch((e) => (this.showToast(errorMessage(e)), null));
-    if (info) await this.reloadAfterHistory(info);
+    if (!this.doc?.can_undo || this.historyBusy) return;
+    this.historyBusy = true;
+    try {
+      const info = await api.undo(this.doc.id).catch((e) => (this.showToast(errorMessage(e)), null));
+      if (info) await this.reloadAfterHistory(info);
+    } finally {
+      this.historyBusy = false;
+    }
   }
   async redo() {
-    if (!this.doc?.can_redo) return;
-    const info = await api.redo(this.doc.id).catch((e) => (this.showToast(errorMessage(e)), null));
-    if (info) await this.reloadAfterHistory(info);
+    if (!this.doc?.can_redo || this.historyBusy) return;
+    this.historyBusy = true;
+    try {
+      const info = await api.redo(this.doc.id).catch((e) => (this.showToast(errorMessage(e)), null));
+      if (info) await this.reloadAfterHistory(info);
+    } finally {
+      this.historyBusy = false;
+    }
   }
-  private async reloadAfterHistory(info: DocumentInfo) {
+  /** Adopt new document info after a structural change (pages added,
+   * removed, moved, rotated, cropped, stamped): all caches are stale. */
+  applyStructure(info: DocumentInfo) {
     this.doc = info;
     this.selected = null;
-    const pages = Object.keys(this.annots).map(Number);
-    const fresh: Record<number, Annotation[]> = {};
-    for (const p of pages) fresh[p] = await api.listAnnotations(info.id, p).catch(() => []);
-    this.annots = fresh;
-    const formPages = Object.keys(this.formFields).map(Number);
-    const freshForms: Record<number, FormField[]> = {};
-    for (const p of formPages) freshForms[p] = await api.listFormFields(info.id, p).catch(() => []);
-    this.formFields = freshForms;
+    this.selection = null;
+    this.texts = {};
+    this.annots = {};
+    this.formFields = {};
+    this.currentPage = Math.min(this.currentPage, Math.max(0, info.page_count - 1));
     this.invalidateRenders();
+  }
+
+  private async reloadAfterHistory(info: DocumentInfo) {
+    // Undo/redo can revert structural changes (page add/remove/move), so
+    // every index-keyed cache is suspect. Reset them all.
+    this.applyStructure(info);
   }
 
   async save(path: string | null = null, flatten = false): Promise<boolean> {

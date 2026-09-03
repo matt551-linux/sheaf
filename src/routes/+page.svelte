@@ -9,6 +9,7 @@
   import NavPanel from "$lib/components/NavPanel.svelte";
   import PageCanvas from "$lib/components/PageCanvas.svelte";
   import NoteEditor from "$lib/components/NoteEditor.svelte";
+  import OrganizeDialog from "$lib/components/OrganizeDialog.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import { api, type Annotation } from "$lib/api";
@@ -18,6 +19,7 @@
   let password = $state("");
   let noteTarget = $state<Annotation | null>(null);
   let showProps = $state(false);
+  let showOrganize = $state(false);
 
   function goToPage(i: number) {
     canvas?.scrollToPage(i);
@@ -237,7 +239,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
@@ -278,6 +280,9 @@
       {/if}
       {#if showProps}
         <PropertiesDialog onClose={() => (showProps = false)} />
+      {/if}
+      {#if showOrganize}
+        <OrganizeDialog onClose={() => (showOrganize = false)} />
       {/if}
 
       {#if docStore.passwordPrompt}

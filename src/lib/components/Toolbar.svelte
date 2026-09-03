@@ -13,8 +13,9 @@
     onExportForm: () => void;
     onImportForm: () => void;
     onValidateForm: () => void;
+    onOrganize: () => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -146,6 +147,7 @@
       aria-pressed={annotateOpen}
       title="Show or hide annotation tools"
     >Annotate</button>
+    <button class={btn} disabled={!hasDoc} onclick={onOrganize} title="Reorder, rotate, delete, insert, extract, crop, and stamp pages">Organize</button>
 
     <span class="flex-1"></span>
     {#if docStore.doc}

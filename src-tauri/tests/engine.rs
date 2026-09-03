@@ -488,3 +488,136 @@ fn form_fields_list_fill_and_xfdf_roundtrip() {
     e.close(fresh.id).unwrap();
     e.close(info.id).unwrap();
 }
+
+#[test]
+fn page_organization_ops() {
+    let e = engine();
+    let info = e.open(fixtures().join("outline.pdf"), None).unwrap();
+    let n0 = info.page_count;
+    assert!(n0 >= 4, "fixture has enough pages ({n0})");
+
+    // ---- rotate ----
+    let info = e.rotate_pages(info.id, vec![0, 1], 90).unwrap();
+    assert_eq!(info.pages[0].rotation, 90, "page 0 rotated");
+    assert_eq!(info.pages[1].rotation, 90, "page 1 rotated");
+    assert_eq!(info.pages[2].rotation, 0, "page 2 untouched");
+    let info = e.rotate_pages(info.id, vec![0], -90).unwrap();
+    assert_eq!(info.pages[0].rotation, 0, "counter-rotation");
+
+    // ---- move: page 1 to the front ----
+    let h1_before = info.pages[1].height;
+    let info = e.move_pages(info.id, vec![1], 0).unwrap();
+    assert_eq!(info.page_count, n0);
+    assert_eq!(info.pages[0].rotation, 90, "rotated page moved to front");
+    assert_eq!(info.pages[0].height, h1_before);
+
+    // ---- delete ----
+    let info = e.delete_pages(info.id, vec![0]).unwrap();
+    assert_eq!(info.page_count, n0 - 1, "one page deleted");
+    assert_eq!(
+        info.pages[0].rotation, 0,
+        "original page 0 is back at front"
+    );
+
+    // ---- undo restores the deleted page ----
+    let info = e.undo(info.id).unwrap();
+    assert_eq!(info.page_count, n0, "undo restored the page");
+    let info = e.undo(info.id).unwrap(); // undo the move too
+    assert_eq!(info.pages[1].rotation, 90, "move undone");
+
+    // ---- extract (split) ----
+    let out = std::env::temp_dir().join(format!("sheaf-extract-{}.pdf", std::process::id()));
+    e.extract_pages(info.id, vec![0, 2], out.clone()).unwrap();
+    let split = e.open(out.clone(), None).unwrap();
+    assert_eq!(split.page_count, 2, "extracted two pages");
+    e.close(split.id).unwrap();
+
+    // ---- insert (merge) ----
+    let before = info.page_count;
+    let info = e.insert_pages(info.id, out.clone(), None, before).unwrap();
+    assert_eq!(
+        info.page_count,
+        before + 2,
+        "two pages merged in at the end"
+    );
+    let _ = std::fs::remove_file(out);
+
+    // ---- crop ----
+    let orig_w = info.pages[0].width;
+    let info = e
+        .crop_pages(
+            info.id,
+            vec![0],
+            [72.0, 72.0, orig_w - 72.0, info.pages[0].height - 72.0],
+        )
+        .unwrap();
+    assert!(
+        (info.pages[0].width - (orig_w - 144.0)).abs() < 1.0,
+        "crop narrowed page 0: {} -> {}",
+        orig_w,
+        info.pages[0].width
+    );
+
+    e.close(info.id).unwrap();
+}
+
+#[test]
+fn stamping_headers_bates_watermark() {
+    let e = engine();
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+
+    let spec = |text: &str, position: &str| sheaf_lib::engine::StampSpec {
+        pages: vec![],
+        text: text.into(),
+        position: position.into(),
+        font_size: 12.0,
+        color: Color { r: 200, g: 0, b: 0 },
+        opacity: 255,
+        start_at: 1,
+        bates_digits: 6,
+    };
+
+    // Header with page numbers.
+    let info2 = e
+        .stamp_pages(info.id, spec("Page {n} of {total}", "header-center"))
+        .unwrap();
+    assert!(info2.modified);
+    let t = e.text(info.id, 0).unwrap();
+    assert!(
+        t.text.contains(&format!("Page 1 of {}", info.page_count)),
+        "header text present on page 0: {:?}",
+        &t.text[..t.text.len().min(120)]
+    );
+
+    // Bates numbering in the footer.
+    e.stamp_pages(info.id, spec("BATES-{bates}", "footer-right"))
+        .unwrap();
+    let t = e.text(info.id, 0).unwrap();
+    assert!(t.text.contains("BATES-000001"), "bates on page 0");
+    if info.page_count > 1 {
+        let t1 = e.text(info.id, 1).unwrap();
+        assert!(t1.text.contains("BATES-000002"), "bates increments");
+    }
+
+    // Watermark renders (visible ink on the page bitmap).
+    let before = e.render(info.id, 0, 0.5, 0).unwrap().png_base64.len();
+    e.stamp_pages(
+        info.id,
+        sheaf_lib::engine::StampSpec {
+            opacity: 60,
+            font_size: 48.0,
+            ..spec("CONFIDENTIAL", "watermark")
+        },
+    )
+    .unwrap();
+    let after = e.render(info.id, 0, 0.5, 0).unwrap().png_base64.len();
+    assert_ne!(before, after, "watermark changed the rendered page");
+
+    // Undo unwinds the watermark.
+    let u = e.undo(info.id).unwrap();
+    assert!(u.can_redo);
+    let t = e.text(info.id, 0).unwrap();
+    assert!(!t.text.contains("CONFIDENTIAL"), "watermark undone");
+
+    e.close(info.id).unwrap();
+}
