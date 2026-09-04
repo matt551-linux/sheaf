@@ -1,9 +1,8 @@
 name: build
+# Manual only. Pushes and tags do NOT start runs; releases are built
+# locally with scripts/release-local.sh until the Actions minute budget
+# allows otherwise. Trigger from the Actions tab when wanted.
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -33,7 +32,6 @@ jobs:
   # Ordinary pushes to main just run the test job above.
   build:
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     strategy:
