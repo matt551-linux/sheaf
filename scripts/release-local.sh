@@ -42,6 +42,18 @@ if [ -n "${SHEAF_SKIP_FRONTEND:-}" ]; then
 else
   pnpm tauri build --target "$rust_target" "$@"
 fi
+# Linux: repack the AppImage without the stale bundled Wayland/GLib/GStreamer
+# libraries (crashes on Mesa 25+ hosts) and re-sign it. See fix-appimage.sh.
+case "$target" in
+  linux-*)
+    for ai in src-tauri/target/"$rust_target"/release/bundle/appimage/*.AppImage; do
+      [ -f "$ai" ] || continue
+      bash scripts/fix-appimage.sh "$ai"
+      node node_modules/@tauri-apps/cli/tauri.js signer sign "$ai" >/dev/null
+    done
+    ;;
+esac
+
 # Put the host's own PDFium back so debug builds keep loading (a cross
 # build leaves the foreign-arch library staged otherwise).
 host_target=$(node scripts/fetch-pdfium.mjs --print-host 2>/dev/null || true)

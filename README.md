@@ -64,9 +64,9 @@ Every release on the [Releases page](https://github.com/matt551-linux/sheaf/rele
 | macOS (Intel and Apple Silicon) | `Sheaf_<ver>_universal.dmg` | Not notarized yet; right-click > Open on first launch |
 | Debian, Ubuntu, Mint, Pop!_OS | `Sheaf_<ver>_amd64.deb`, `..._arm64.deb` | `sudo apt install ./Sheaf_*.deb` pulls WebKitGTK 4.1 and GTK 3 |
 | Fedora, RHEL, Rocky, Alma, openSUSE | `Sheaf-<ver>-1.x86_64.rpm`, `...aarch64.rpm` | `sudo dnf install ./Sheaf-*.rpm` |
-| Arch, Omarchy, Manjaro, NixOS, anything else | `Sheaf_<ver>_amd64.AppImage`, `..._aarch64.AppImage` | `chmod +x` and run; needs `webkit2gtk-4.1` installed (Arch: `pacman -S webkit2gtk-4.1`) |
+| Arch, Omarchy, Manjaro, NixOS, anything else | `Sheaf_<ver>_amd64.AppImage` (Intel/AMD), `..._aarch64.AppImage` (ARM) | `chmod +x` and run; needs `webkit2gtk-4.1` and `gst-plugins-base` installed (Arch: `pacman -S webkit2gtk-4.1 gst-plugins-base gst-plugins-good`) |
 
-The Linux packages are built on Ubuntu runners but only depend on `libwebkit2gtk-4.1` and `libgtk-3`, which every current distribution ships. An AUR package is planned.
+Naming: `amd64` = `x86_64` = `x64` (Intel/AMD); `arm64` = `aarch64` (ARM). The Linux packages are built on Ubuntu 22.04 and depend only on `libwebkit2gtk-4.1`, `libgtk-3` and the host GStreamer, which every current distribution ships. The AppImage deliberately uses the host's Wayland, GLib and GStreamer libraries rather than bundled copies, so it works on rolling distributions with new Mesa. An AUR package is planned.
 
 Installed copies check for updates a few seconds after launch and offer a one-click "Update and restart"; File > Check for updates does it on demand. Updates are verified against a signing key embedded in the app.
 

@@ -20,3 +20,4 @@ scripts/xcheck-engine/target/
 /dist/
 /dist-linux/
 /stage/
+/fixed/
