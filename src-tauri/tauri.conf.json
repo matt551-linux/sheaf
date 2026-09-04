@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Sheaf",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "org.sheafpdf.sheaf",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -28,7 +28,9 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "resources": ["resources/*"],
+    "resources": [
+      "resources/*"
+    ],
     "shortDescription": "Open-source PDF reader and editor",
     "longDescription": "Sheaf is an open-source, cross-platform PDF reader and editor aiming for feature parity with Adobe Acrobat.",
     "icon": [
@@ -40,11 +42,25 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["pdf"],
+        "ext": [
+          "pdf"
+        ],
         "mimeType": "application/pdf",
         "description": "PDF document",
         "role": "Editor"
       }
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFQjJERUVEMTI3RENBNzAKUldSd3luMFM3ZDZ5ampkbVRGWGFIMjdFOHNwdzBXb1RBSlRvKzA0b3NHQnB5OXQvdWVHbnBJWlAK",
+      "endpoints": [
+        "https://github.com/matt551-linux/sheaf/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

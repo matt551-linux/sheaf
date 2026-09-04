@@ -13,6 +13,8 @@
   import SecurityPanel from "$lib/components/SecurityPanel.svelte";
   import EditPanel from "$lib/components/EditPanel.svelte";
   import ToolsPanel from "$lib/components/ToolsPanel.svelte";
+  import UpdateBanner from "$lib/components/UpdateBanner.svelte";
+  import { updater } from "$lib/stores/updater.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import { api, errorMessage, type Annotation } from "$lib/api";
@@ -256,6 +258,8 @@
   }
 
   onMount(() => {
+    // Quiet update check a few seconds after launch; never blocks opening files.
+    setTimeout(() => void updater.checkNow(false), 4000);
     void docStore
       .loadPrefs()
       .then(() => api.launchFiles())
@@ -297,7 +301,8 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (toolsTab = null), (securityTab = t))} onEdit={() => ((securityTab = null), (toolsTab = null), (showEdit = !showEdit))} onTools={(t) => ((securityTab = null), (showEdit = false), (toolsTab = t))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} />
+  <UpdateBanner />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (toolsTab = null), (securityTab = t))} onEdit={() => ((securityTab = null), (toolsTab = null), (showEdit = !showEdit))} onTools={(t) => ((securityTab = null), (showEdit = false), (toolsTab = t))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} onCheckUpdates={() => updater.checkNow(true).then(() => { if (updater.state.kind === "none") docStore.showToast("Sheaf is up to date"); })} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">

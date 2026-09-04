@@ -52,7 +52,23 @@ pnpm check                                 # svelte-check / TypeScript
 | M5 | Sign and protect: self-signed or imported (.p12) digital IDs, visible signatures, verification, DocMDP lock, AES-256 password and permissions | working |
 | M6 | Edit: edit, move, scale and delete text runs and images, add text and images, links, create PDF from images, export pages to PNG and text | working (Office/HTML import and DOCX/PDF-A export deferred) |
 | M7 | Redact (true content removal, by area or by search), Compare (word diff plus visual diff), OCR (local, ocrs models downloaded on demand), Accessibility checks | working |
-| M8 | Installers for all platforms (CI artifacts today), auto-update, localization, plugin API | in progress |
+| M8 | Installers for all platforms and auto-update: working. Localization and plugin API: planned |
+
+## Installing
+
+Every release on the [Releases page](https://github.com/matt551-linux/sheaf/releases) ships installers built by CI:
+
+| Platform | File | Notes |
+| --- | --- | --- |
+| Windows x64 / ARM64 | `Sheaf_<ver>_x64-setup.exe`, `..._arm64-setup.exe` (also `.msi`) | Not code-signed yet; SmartScreen shows "More info > Run anyway" |
+| macOS (Intel and Apple Silicon) | `Sheaf_<ver>_universal.dmg` | Not notarized yet; right-click > Open on first launch |
+| Debian, Ubuntu, Mint, Pop!_OS | `Sheaf_<ver>_amd64.deb`, `..._arm64.deb` | `sudo apt install ./Sheaf_*.deb` pulls WebKitGTK 4.1 and GTK 3 |
+| Fedora, RHEL, Rocky, Alma, openSUSE | `Sheaf-<ver>-1.x86_64.rpm`, `...aarch64.rpm` | `sudo dnf install ./Sheaf-*.rpm` |
+| Arch, Omarchy, Manjaro, NixOS, anything else | `Sheaf_<ver>_amd64.AppImage`, `..._aarch64.AppImage` | `chmod +x` and run; needs `webkit2gtk-4.1` installed (Arch: `pacman -S webkit2gtk-4.1`) |
+
+The Linux packages are built on Ubuntu runners but only depend on `libwebkit2gtk-4.1` and `libgtk-3`, which every current distribution ships. An AUR package is planned.
+
+Installed copies check for updates a few seconds after launch and offer a one-click "Update and restart"; File > Check for updates does it on demand. Updates are verified against a signing key embedded in the app.
 
 Platform targets: Windows (x64, ARM64), macOS (universal), Linux (deb, rpm, AppImage, AUR).
 
