@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: Linux Tauri prerequisites
         run: |
           sudo apt-get update
@@ -29,8 +32,11 @@ jobs:
       - run: pnpm test
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  # Full five-platform bundle build: on version tags and manual dispatch only.
+  # Ordinary pushes to main just run the test job above.
   build:
     needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +66,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.pdfium }}
       - name: Linux Tauri prerequisites
         if: startsWith(matrix.os, 'ubuntu')
         run: |
