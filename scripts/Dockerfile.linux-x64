@@ -1,0 +1,21 @@
+# Linux x64 release build environment, mirrors the CI ubuntu-22.04 job.
+# Build:  docker build --platform linux/amd64 -t sheaf-linux-x64 -f scripts/Dockerfile.linux-x64 .
+# Run:    docker run --rm --platform linux/amd64 -v <repo>:/src -v <key>:/run/sheaf.key:ro sheaf-linux-x64
+FROM --platform=linux/amd64 ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive PATH=/root/.cargo/bin:$PATH NO_STRIP=true
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl wget file git ca-certificates pkg-config libssl-dev \
+    libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+    patchelf xdg-utils rpm squashfs-tools \
+  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs \
+  && npm i -g pnpm@10 && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+WORKDIR /work
+# Copy the checkout in (bind mounts through QEMU are slow and confuse cargo).
+CMD git clone -q /src /work/sheaf && cd /work/sheaf \
+  && export TAURI_SIGNING_PRIVATE_KEY="$(cat /run/sheaf.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+  && pnpm install --frozen-lockfile \
+  && bash scripts/release-local.sh linux-x64 \
+  && mkdir -p /src/dist-linux \
+  && find src-tauri/target -path '*release/bundle/*' -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.sig' \) -exec cp {} /src/dist-linux/ \; \
+  && ls -la /src/dist-linux
