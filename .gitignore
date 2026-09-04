@@ -15,3 +15,8 @@ src-tauri/resources/*
 !src-tauri/resources/.gitkeep
 .hermes/
 scripts/xcheck-engine/target/
+
+# local release staging
+/dist/
+/dist-linux/
+/stage/
