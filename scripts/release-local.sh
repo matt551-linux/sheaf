@@ -24,7 +24,17 @@ mkdir -p src-tauri/resources
 rm -f src-tauri/resources/*pdfium.*
 cp src-tauri/pdfium/"$target"/*pdfium.* src-tauri/resources/
 
-pnpm tauri build "$@"
+# Always name bundles by the explicit Rust target; without it tauri labels
+# them by the host default (an ARM64 host still produces "_x64" names).
+case "$target" in
+  win-x64)     rust_target=x86_64-pc-windows-msvc ;;
+  win-arm64)   rust_target=aarch64-pc-windows-msvc ;;
+  linux-x64)   rust_target=x86_64-unknown-linux-gnu ;;
+  linux-arm64) rust_target=aarch64-unknown-linux-gnu ;;
+  mac-univ)    rust_target=universal-apple-darwin ;;
+  *) echo "unknown target $target" >&2; exit 1 ;;
+esac
+pnpm tauri build --target "$rust_target" "$@"
 echo "bundles:"
 find src-tauri/target -path '*release/bundle/*' -type f \
   \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) \
