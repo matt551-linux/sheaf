@@ -5,6 +5,7 @@
   import { docStore, type Tool } from "$lib/stores/document.svelte";
   import type { Annotation, Rect } from "$lib/api";
   import FormLayer from "./FormLayer.svelte";
+  import TextBlockEditor from "./TextBlockEditor.svelte";
   import {
     charAt,
     colorToCss,
@@ -357,6 +358,10 @@
       <polyline points={inkPx(inkPath)} fill="none" stroke={strokeCss} stroke-width={strokeW} stroke-linecap="round" stroke-linejoin="round" />
     {/if}
   </svg>
+
+  {#if docStore.editMode}
+    <TextBlockEditor {index} {size} {zoom} {rot} />
+  {/if}
 
   {#if tool === "select" || tool === "hand"}
     <!-- Form controls only take input with non-drawing tools active, so the

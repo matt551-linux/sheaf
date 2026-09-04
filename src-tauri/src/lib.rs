@@ -3,6 +3,7 @@ pub mod edit;
 pub mod engine;
 mod error;
 pub mod security;
+pub mod textedit;
 pub mod tools;
 
 use std::path::PathBuf;
@@ -124,6 +125,8 @@ pub fn run() {
             commands::protect_document,
             commands::unprotect_document,
             commands::list_page_objects,
+            commands::list_text_blocks,
+            commands::set_text_block,
             commands::set_text_object,
             commands::move_page_object,
             commands::delete_page_object,

@@ -401,6 +401,8 @@ enum Request {
     Unprotect(DocId, Sender<Result<DocumentInfo>>),
     // M6: edit
     ListPageObjects(DocId, u16, Sender<Result<Vec<crate::edit::PageObject>>>),
+    ListTextBlocks(DocId, u16, Sender<Result<Vec<crate::textedit::TextBlock>>>),
+    SetTextBlock(DocId, u16, crate::textedit::BlockEdit, Sender<Result<DocumentInfo>>),
     SetTextObject(DocId, u16, u32, String, Option<f32>, Sender<Result<DocumentInfo>>),
     MovePageObject(DocId, u16, u32, f32, f32, f32, Sender<Result<DocumentInfo>>),
     DeletePageObject(DocId, u16, u32, Sender<Result<DocumentInfo>>),
@@ -610,6 +612,12 @@ impl Engine {
     }
     pub fn list_page_objects(&self, id: DocId, page: u16) -> Result<Vec<crate::edit::PageObject>> {
         self.call(|r| Request::ListPageObjects(id, page, r))
+    }
+    pub fn list_text_blocks(&self, id: DocId, page: u16) -> Result<Vec<crate::textedit::TextBlock>> {
+        self.call(|r| Request::ListTextBlocks(id, page, r))
+    }
+    pub fn set_text_block(&self, id: DocId, page: u16, edit: crate::textedit::BlockEdit) -> Result<DocumentInfo> {
+        self.call(|r| Request::SetTextBlock(id, page, edit, r))
     }
     pub fn set_text_object(&self, id: DocId, page: u16, obj: u32, text: String, font_size: Option<f32>) -> Result<DocumentInfo> {
         self.call(|r| Request::SetTextObject(id, page, obj, text, font_size, r))
@@ -833,6 +841,12 @@ impl EngineState {
             }
             Request::ListPageObjects(id, p, r) => {
                 let _ = r.send(self.list_page_objects(id, p));
+            }
+            Request::ListTextBlocks(id, p, r) => {
+                let _ = r.send(self.text_blocks(id, p));
+            }
+            Request::SetTextBlock(id, p, ed, r) => {
+                let _ = r.send(self.set_text_block(id, p, &ed));
             }
             Request::SetTextObject(id, p, o, t, fs, r) => {
                 let _ = r.send(self.set_text_object(id, p, o, t, fs));

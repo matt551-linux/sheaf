@@ -42,6 +42,13 @@ if [ -n "${SHEAF_SKIP_FRONTEND:-}" ]; then
 else
   pnpm tauri build --target "$rust_target" "$@"
 fi
+# Put the host's own PDFium back so debug builds keep loading (a cross
+# build leaves the foreign-arch library staged otherwise).
+host_target=$(node scripts/fetch-pdfium.mjs --print-host 2>/dev/null || true)
+if [ -n "$host_target" ] && [ "$host_target" != "$target" ] && [ -d "src-tauri/pdfium/$host_target" ]; then
+  rm -f src-tauri/resources/*pdfium.*
+  cp src-tauri/pdfium/"$host_target"/*pdfium.* src-tauri/resources/
+fi
 echo "bundles:"
 find src-tauri/target -path '*release/bundle/*' -type f \
   \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) \

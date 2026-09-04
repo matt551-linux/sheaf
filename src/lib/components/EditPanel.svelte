@@ -16,6 +16,16 @@
   let links = $state<LinkInfo[]>([]);
   let selected = $state<number | null>(null);
   let filter = $state<"all" | "text" | "image">("all");
+  /** "text": edit paragraphs directly on the page. "objects": raw object list. */
+  let mode = $state<"text" | "objects">("text");
+  $effect(() => {
+    docStore.editMode = mode === "text" && !!doc;
+    return () => {
+      docStore.editMode = false;
+      docStore.editingBlock = null;
+    };
+  });
+  const blockCount = $derived((docStore.textBlocks[page] ?? []).length);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let editText = $state("");
@@ -182,10 +192,9 @@
     <div class="m-2 rounded bg-red-100 px-2 py-1 text-xs text-red-800 dark:bg-red-900 dark:text-red-100" role="alert">{error}</div>
   {/if}
 
-  <div class="flex shrink-0 items-center gap-1 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-    <button class={chip(filter === "all")} onclick={() => (filter = "all")}>All {objects.length}</button>
-    <button class={chip(filter === "text")} onclick={() => (filter = "text")}>Text {objects.filter((o) => o.kind === "text").length}</button>
-    <button class={chip(filter === "image")} onclick={() => (filter = "image")}>Images {objects.filter((o) => o.kind === "image").length}</button>
+  <div class="flex shrink-0 items-center gap-1 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800" role="tablist">
+    <button class={chip(mode === "text")} role="tab" aria-selected={mode === "text"} onclick={() => (mode = "text")}>Text</button>
+    <button class={chip(mode === "objects")} role="tab" aria-selected={mode === "objects"} onclick={() => (mode = "objects")}>Objects {objects.length}</button>
     <span class="flex-1"></span>
     {#if placingImage || placingLink || placingText}
       <button class="{btn} h-6 text-xs" onclick={cancelPlacing}>Cancel</button>
@@ -200,12 +209,32 @@
   {:else if placingText}
     <div class="m-2 rounded bg-blue-50 p-2 text-xs text-blue-900 dark:bg-blue-950 dark:text-blue-100">Drag a small box on the page; the text starts at its bottom-left corner.</div>
   {/if}
-  <div class="flex shrink-0 gap-1 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
-    <input class={field} placeholder="New text…" bind:value={newText} />
-    <input type="number" min="4" max="144" class="{field} w-16" bind:value={newTextSize} aria-label="Font size" />
-    <button class="{btn} shrink-0" disabled={busy || placingText || !doc} onclick={startText} title="Add a Helvetica text run where you drag">+ Text</button>
-  </div>
 
+  {#if mode === "text"}
+    <div class="min-h-0 flex-1 overflow-y-auto p-3 text-sm">
+      <p class="mb-2">Click any paragraph on the page to edit it in place. Text rewraps to the paragraph's width; the font, size, colour and line spacing are kept.</p>
+      <ul class="mb-3 list-disc space-y-1 pl-5 text-xs text-neutral-600 dark:text-neutral-300">
+        <li><kbd>Ctrl</kbd>+<kbd>Enter</kbd> or click elsewhere applies; <kbd>Esc</kbd> cancels.</li>
+        <li>Blank line in the editor starts a new paragraph line.</li>
+        <li>Characters the original font lacks fall back to Helvetica.</li>
+        <li>Undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) reverts an edit.</li>
+      </ul>
+      <div class="text-xs text-neutral-500">{blockCount} paragraph{blockCount === 1 ? "" : "s"} on this page.</div>
+      <div class="mt-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+        <div class="mb-1 text-xs font-semibold text-neutral-500">Add new text</div>
+        <div class="flex gap-1">
+          <input class={field} placeholder="New text…" bind:value={newText} />
+          <input type="number" min="4" max="144" class="{field} w-16" bind:value={newTextSize} aria-label="Font size" />
+          <button class="{btn} shrink-0" disabled={busy || placingText || !doc} onclick={startText} title="Add a Helvetica text run where you drag">+ Text</button>
+        </div>
+      </div>
+    </div>
+  {:else}
+  <div class="flex shrink-0 items-center gap-1 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
+    <button class={chip(filter === "all")} onclick={() => (filter = "all")}>All {objects.length}</button>
+    <button class={chip(filter === "text")} onclick={() => (filter = "text")}>Text {objects.filter((o) => o.kind === "text").length}</button>
+    <button class={chip(filter === "image")} onclick={() => (filter = "image")}>Images {objects.filter((o) => o.kind === "image").length}</button>
+  </div>
   <ul class="min-h-0 flex-1 overflow-y-auto text-xs" role="listbox" aria-label="Page objects">
     {#each shown as o (o.index)}
       <li>
@@ -254,6 +283,8 @@
         <button class="{btn} text-red-700 dark:text-red-300" disabled={busy} onclick={del} title="Delete object">🗑</button>
       </div>
     </div>
+  {/if}
+
   {/if}
 
   <div class="shrink-0 space-y-1 border-t border-neutral-300 p-2 text-sm dark:border-neutral-700">

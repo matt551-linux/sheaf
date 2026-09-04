@@ -169,9 +169,9 @@
             aria-current={docStore.currentPage === p.index ? "page" : undefined}
           >
             {#if thumbs[p.index]}
-              <img src={thumbs[p.index]} alt="Page {p.index + 1}" class="mx-auto max-h-48 shadow" draggable="false" />
+              <img src={thumbs[p.index]} alt="Page {p.index + 1}" class="mx-auto max-h-48 shadow {docStore.nightMode ? 'night' : ''}" draggable="false" />
             {:else}
-              <div class="mx-auto flex h-40 w-28 items-center justify-center bg-white text-xs text-neutral-400 shadow">...</div>
+              <div class="mx-auto flex h-40 w-28 items-center justify-center text-xs text-neutral-400 shadow {docStore.nightMode ? 'bg-black' : 'bg-white'}">...</div>
             {/if}
             <div class="mt-1 text-xs">{p.index + 1}</div>
           </button>
@@ -268,3 +268,10 @@
     {/if}
   </aside>
 {/if}
+
+<style>
+  /* Match PageView: night mode inverts the rendered page image. */
+  img.night {
+    filter: invert(1) hue-rotate(180deg);
+  }
+</style>

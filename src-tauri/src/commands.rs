@@ -347,6 +347,16 @@ pub async fn list_page_objects(engine: State<'_, Engine>, id: u32, page: u16) ->
 }
 
 #[tauri::command]
+pub async fn list_text_blocks(engine: State<'_, Engine>, id: u32, page: u16) -> Result<Vec<crate::textedit::TextBlock>> {
+    engine.list_text_blocks(id, page)
+}
+
+#[tauri::command]
+pub async fn set_text_block(engine: State<'_, Engine>, id: u32, page: u16, edit: crate::textedit::BlockEdit) -> Result<DocumentInfo> {
+    engine.set_text_block(id, page, edit)
+}
+
+#[tauri::command]
 pub async fn set_text_object(
     engine: State<'_, Engine>,
     id: u32,

@@ -25,6 +25,10 @@ function hostTarget() {
   return isArm ? "linux-arm64" : "linux-x64";
 }
 
+if (process.argv[2] === "--print-host") {
+  console.log(hostTarget());
+  process.exit(0);
+}
 const target = process.argv[2] ?? hostTarget();
 const outDir = join(root, "src-tauri", "pdfium", target);
 const libName = target.startsWith("win") ? "pdfium.dll" : target.startsWith("mac") ? "libpdfium.dylib" : "libpdfium.so";

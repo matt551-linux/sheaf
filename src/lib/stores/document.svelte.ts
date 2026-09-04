@@ -15,6 +15,8 @@ import {
   type Rect,
   type SearchHit,
   type SignatureInfo,
+  type TextBlock,
+  type BlockEdit,
 } from "$lib/api";
 import {
   clampZoom,
@@ -121,6 +123,28 @@ class DocumentStore {
   placingSignature = $state<((page: number, rect: Rect) => void) | null>(null);
   /** Object highlighted by the Edit panel (PDF coords). */
   editHighlight = $state<{ page: number; rect: Rect } | null>(null);
+  /** Paragraph editing mode: on while the Edit panel is open. */
+  editMode = $state(false);
+  /** Text blocks per page, loaded while editMode is on. */
+  textBlocks = $state<Record<number, TextBlock[]>>({});
+  /** Block currently open in the in-place editor. */
+  editingBlock = $state<{ page: number; id: number } | null>(null);
+
+  async ensureBlocks(page: number, force = false): Promise<void> {
+    if (!this.doc || (!force && this.textBlocks[page])) return;
+    const id = this.doc.id;
+    const blocks = await api.listTextBlocks(id, page);
+    if (this.doc?.id !== id) return;
+    this.textBlocks = { ...this.textBlocks, [page]: blocks };
+  }
+
+  async commitBlock(page: number, edit: BlockEdit): Promise<void> {
+    if (!this.doc) return;
+    const info = await api.setTextBlock(this.doc.id, page, edit);
+    this.editingBlock = null;
+    this.applyStructure(info);
+    await this.ensureBlocks(page, true);
+  }
   /** Pending redaction marks (not yet applied), by page. */
   redactMarks = $state<Record<number, Rect[]>>({});
 
@@ -510,6 +534,8 @@ class DocumentStore {
     this.texts = {};
     this.annots = {};
     this.formFields = {};
+    this.textBlocks = {};
+    this.editingBlock = null;
     this.currentPage = Math.min(this.currentPage, Math.max(0, info.page_count - 1));
     this.invalidateRenders();
   }

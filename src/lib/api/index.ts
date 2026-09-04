@@ -255,6 +255,28 @@ export interface SecuritySpec {
 
 // ---------- M6: edit ----------
 
+export interface TextBlock {
+  id: number;
+  rect: Rect;
+  text: string;
+  font: string;
+  font_size: number;
+  leading: number;
+  color: Color;
+  objects: number[];
+  baseline_x: number;
+  baseline_y: number;
+  line_count: number;
+}
+export interface BlockEdit {
+  id: number;
+  text: string;
+  width?: number | null;
+  dx?: number;
+  dy?: number;
+  font_size?: number | null;
+}
+
 export interface PageObject {
   index: number;
   kind: "text" | "image" | "path" | "shading" | "form" | "unknown";
@@ -374,6 +396,8 @@ export const api = {
   unprotectDocument: (id: number) => invoke<DocumentInfo>("unprotect_document", { id }),
   listPageObjects: (id: number, page: number) =>
     invoke<PageObject[]>("list_page_objects", { id, page }),
+  listTextBlocks: (id: number, page: number) => invoke<TextBlock[]>("list_text_blocks", { id, page }),
+  setTextBlock: (id: number, page: number, edit: BlockEdit) => invoke<DocumentInfo>("set_text_block", { id, page, edit }),
   setTextObject: (id: number, page: number, obj: number, text: string, fontSize: number | null = null) =>
     invoke<DocumentInfo>("set_text_object", { id, page, obj, text, fontSize }),
   movePageObject: (id: number, page: number, obj: number, dx: number, dy: number, scale = 1) =>

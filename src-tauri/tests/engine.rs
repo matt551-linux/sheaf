@@ -907,3 +907,64 @@ fn m7_redact_compare_accessibility_and_ocr() {
     let hits = e.search(sc.id, "dummy".into(), false, false).unwrap();
     assert!(!hits.is_empty(), "OCR text is not searchable");
 }
+
+// ---------- M6b: paragraph text editing ----------
+
+#[test]
+fn m6b_text_blocks_group_lines_and_reflow() {
+    use sheaf_lib::edit::TextSpec;
+    use sheaf_lib::textedit::BlockEdit;
+    let engine = engine();
+    let src = std::env::temp_dir().join(format!("sheaf-para-{}.pdf", std::process::id()));
+    std::fs::copy(fixtures().join("sample.pdf"), &src).unwrap();
+    let info = engine.open(src.clone(), None).unwrap();
+    let id = info.id;
+
+    // Lay down a three line paragraph the way a producer would: one run per
+    // line, 14pt leading, plus a separate heading far above it.
+    for (i, line) in ["The quick brown fox jumps", "over the lazy dog and keeps", "running until the end."].iter().enumerate() {
+        engine
+            .add_text(id, 0, TextSpec { text: line.to_string(), x: 72.0, y: 500.0 - 14.0 * i as f32, font: "Helvetica".into(), font_size: 12.0, color: None })
+            .unwrap();
+    }
+    engine.add_text(id, 0, TextSpec { text: "Heading".into(), x: 72.0, y: 600.0, font: "Helvetica-Bold".into(), font_size: 20.0, color: None }).unwrap();
+
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let para = blocks.iter().find(|b| b.text.starts_with("The quick")).expect("paragraph block");
+    assert_eq!(para.line_count, 3, "three lines grouped into one block: {:?}", blocks.iter().map(|b| &b.text).collect::<Vec<_>>());
+    assert_eq!(para.text, "The quick brown fox jumps over the lazy dog and keeps running until the end.");
+    assert!((para.leading - 14.0).abs() < 0.5, "leading {}", para.leading);
+    assert!((para.font_size - 12.0).abs() < 0.1);
+    let heading = blocks.iter().find(|b| b.text == "Heading").expect("heading is its own block");
+    assert_eq!(heading.line_count, 1);
+    assert!(heading.id != para.id);
+
+    // Edit the paragraph as one piece: shorter text should reflow to fewer lines.
+    engine
+        .set_text_block(id, 0, BlockEdit { id: para.id, text: "Short now.".into(), width: None, dx: 0.0, dy: 0.0, font_size: None })
+        .unwrap();
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let para2 = blocks.iter().find(|b| b.text == "Short now.").expect("edited block");
+    assert_eq!(para2.line_count, 1);
+    assert!((para2.baseline_y - 500.0).abs() < 0.5, "first baseline kept: {}", para2.baseline_y);
+    assert!(blocks.iter().all(|b| !b.text.contains("quick")), "old runs removed");
+
+    // Longer text wraps within the original width and keeps the leading.
+    let long = "Now a much longer replacement paragraph that certainly needs to wrap onto several lines to fit the width.";
+    engine
+        .set_text_block(id, 0, BlockEdit { id: para2.id, text: long.into(), width: Some(para.rect.w), dx: 0.0, dy: 0.0, font_size: None })
+        .unwrap();
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let para3 = blocks.iter().find(|b| b.text.starts_with("Now a much")).expect("wrapped block");
+    assert!(para3.line_count >= 3, "wrapped into {} lines", para3.line_count);
+    assert_eq!(para3.text, long);
+    assert!(para3.rect.w <= para.rect.w + 1.0, "kept within width: {} vs {}", para3.rect.w, para.rect.w);
+    assert!((para3.leading - 14.0).abs() < 0.5);
+
+    // Undo restores the original paragraph.
+    engine.undo(id).unwrap();
+    engine.undo(id).unwrap();
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    assert!(blocks.iter().any(|b| b.text.starts_with("The quick brown fox")));
+    engine.close(id).unwrap();
+}
