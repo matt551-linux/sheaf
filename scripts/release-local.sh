@@ -34,7 +34,14 @@ case "$target" in
   mac-univ)    rust_target=universal-apple-darwin ;;
   *) echo "unknown target $target" >&2; exit 1 ;;
 esac
-pnpm tauri build --target "$rust_target" "$@"
+# SHEAF_SKIP_FRONTEND=1 reuses an existing build/ (the frontend is
+# architecture independent; esbuild crashes under QEMU emulation).
+if [ -n "${SHEAF_SKIP_FRONTEND:-}" ]; then
+  [ -d build ] || { echo "SHEAF_SKIP_FRONTEND set but build/ is missing" >&2; exit 1; }
+  pnpm tauri build --target "$rust_target" --config '{"build":{"beforeBuildCommand":""}}' "$@"
+else
+  pnpm tauri build --target "$rust_target" "$@"
+fi
 echo "bundles:"
 find src-tauri/target -path '*release/bundle/*' -type f \
   \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) \
