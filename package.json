@@ -1,6 +1,6 @@
 {
   "name": "sheaf",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Open-source PDF reader and editor",
   "type": "module",
   "scripts": {
@@ -30,6 +30,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
+    "happy-dom": "^20.14.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.3.3",

@@ -158,7 +158,10 @@ class DocumentStore {
   /** Bumped whenever page bitmaps must be re-fetched (annotation edits, undo). */
   renderVersion = $state(0);
 
-  private cache = new Map<string, string>();
+  private cache = new Map<string, { url: string; bytes: number }>();
+  private cacheBytes = 0;
+  private cacheGeneration = 0;
+  private readonly cacheByteLimit = 64 * 1024 * 1024;
   private inflight = new Map<string, Promise<string>>();
   private cacheOrder: string[] = [];
   private readonly cacheLimit = 40;
@@ -285,6 +288,8 @@ class DocumentStore {
 
   private resetView() {
     this.cache.clear();
+    this.cacheBytes = 0;
+    this.cacheGeneration++;
     this.inflight.clear();
     this.cacheOrder = [];
     this.outline = [];
@@ -350,6 +355,8 @@ class DocumentStore {
 
   invalidateRenders() {
     this.cache.clear();
+    this.cacheBytes = 0;
+    this.cacheGeneration++;
     this.cacheOrder = [];
     this.renderVersion++;
   }
@@ -360,53 +367,86 @@ class DocumentStore {
     const scale = Math.round(this.renderScale * 1000) / 1000;
     const key = `${doc.id}:${index}@${scale}r${this.rotation}v${this.renderVersion}`;
     const hit = this.cache.get(key);
-    if (hit) return hit;
+    if (hit) return hit.url;
     const pending = this.inflight.get(key);
     if (pending) return pending;
+    const generation = this.cacheGeneration;
     const p = api
       .renderPage(doc.id, index, scale, this.rotation)
       .then((r) => {
         const url = `data:image/png;base64,${r.png_base64}`;
-        this.cache.set(key, url);
-        this.cacheOrder.push(key);
-        while (this.cacheOrder.length > this.cacheLimit) {
-          const old = this.cacheOrder.shift();
-          if (old) this.cache.delete(old);
+        const bytes = r.width_px * r.height_px * 4 + url.length * 2;
+        if (generation !== this.cacheGeneration || this.doc?.id !== doc.id) return url;
+        // Include a conservative decoded RGBA cost as well as the JS string.
+        // Oversized pages may be displayed, but must not occupy the cache.
+        if (bytes <= this.cacheByteLimit) {
+          this.cache.set(key, { url, bytes });
+          this.cacheBytes += bytes;
+          this.cacheOrder.push(key);
+          while (this.cacheOrder.length > this.cacheLimit || this.cacheBytes > this.cacheByteLimit) {
+            const old = this.cacheOrder.shift()!;
+            this.cacheBytes -= this.cache.get(old)?.bytes ?? 0;
+            this.cache.delete(old);
+          }
         }
         return url;
       })
-      .finally(() => this.inflight.delete(key));
+      .finally(() => {
+        if (this.inflight.get(key) === p) this.inflight.delete(key);
+      });
     this.inflight.set(key, p);
     return p;
+  }
+
+  // Requests belong to a particular cache object. Replacing a cache on
+  // close/history/structure changes invalidates its pending writes too.
+  private pageLoads = new WeakMap<object, Map<number, Promise<unknown>>>();
+  private loadPage<T>(cache: Record<number, T>, page: number,
+    load: () => Promise<T | null>, current: () => boolean, force = false): Promise<T | null> {
+    if (!force && cache[page]) return Promise.resolve(cache[page]);
+    let pending = this.pageLoads.get(cache);
+    if (!pending) this.pageLoads.set(cache, pending = new Map());
+    const existing = pending.get(page);
+    if (!force && existing) return existing as Promise<T | null>;
+    const request = load().then((value) => {
+      if (value !== null && current() && pending.get(page) === request) {
+        // Per-page writes avoid invalidating every mounted page's load effect.
+        cache[page] = value;
+      }
+      return value;
+    }).finally(() => {
+      if (pending.get(page) === request) pending.delete(page);
+    });
+    pending.set(page, request);
+    return request;
   }
 
   // ----- text layer -----
 
   async ensureText(page: number): Promise<PageText | null> {
     if (!this.doc) return null;
-    const have = this.texts[page];
-    if (have) return have;
-    const t = await api.pageText(this.doc.id, page).catch(() => null);
-    if (t && this.doc) this.texts = { ...this.texts, [page]: t };
-    return t;
+    const id = this.doc.id;
+    const cache = this.texts;
+    return this.loadPage(cache, page, () => api.pageText(id, page).catch(() => null),
+      () => this.doc?.id === id && this.texts === cache);
   }
 
   // ----- annotations -----
 
   async ensureAnnots(page: number, force = false): Promise<Annotation[]> {
     if (!this.doc) return [];
-    if (!force && this.annots[page]) return this.annots[page];
-    const list = await api.listAnnotations(this.doc.id, page).catch(() => []);
-    if (this.doc) this.annots = { ...this.annots, [page]: list };
-    return list;
+    const id = this.doc.id;
+    const cache = this.annots;
+    return (await this.loadPage(cache, page, () => api.listAnnotations(id, page).catch(() => []),
+      () => this.doc?.id === id && this.annots === cache, force)) ?? [];
   }
 
   async ensureFormFields(page: number, force = false): Promise<FormField[]> {
     if (!this.doc) return [];
-    if (!force && this.formFields[page]) return this.formFields[page];
-    const list = await api.listFormFields(this.doc.id, page).catch(() => []);
-    if (this.doc) this.formFields = { ...this.formFields, [page]: list };
-    return list;
+    const id = this.doc.id;
+    const cache = this.formFields;
+    return (await this.loadPage(cache, page, () => api.listFormFields(id, page).catch(() => []),
+      () => this.doc?.id === id && this.formFields === cache, force)) ?? [];
   }
 
   /** Set a field value and refresh that page (radio groups may change siblings). */

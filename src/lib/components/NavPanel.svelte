@@ -10,29 +10,39 @@
   }
   let { onGoToPage, onOpenNote }: Props = $props();
 
-  // Thumbnails
+  // Fixed-height virtual rows bound both DOM/decoded images and render work.
   let thumbs = $state<Record<number, string>>({});
-  let thumbDocId = -1;
-  let thumbVersion = -1;
+  let thumbScroll = $state(0);
+  let thumbHeight = $state(600);
+  const THUMB_ROW = 224;
   const THUMB_SCALE = 0.25 * (96 / 72);
+  const thumbSession = $derived(docStore.doc?.id);
+  $effect(() => {
+    void thumbSession;
+    void docStore.navPanel;
+    thumbScroll = 0;
+  });
+  const thumbStart = $derived(Math.max(0, Math.floor(thumbScroll / THUMB_ROW) - 1));
+  const thumbEnd = $derived(Math.min(docStore.doc?.page_count ?? 0,
+    Math.ceil((thumbScroll + thumbHeight) / THUMB_ROW) + 1));
   $effect(() => {
     const doc = docStore.doc;
     const ver = docStore.renderVersion;
-    if (!doc) {
-      thumbs = {};
-      thumbDocId = -1;
-      return;
-    }
-    if (docStore.navPanel !== "thumbnails" || (thumbDocId === doc.id && thumbVersion === ver)) return;
-    thumbDocId = doc.id;
-    thumbVersion = ver;
+    const start = thumbStart;
+    const end = thumbEnd;
+    const panel = docStore.navPanel;
+    thumbs = {};
+    if (!doc || panel !== "thumbnails") return;
+    let cancelled = false;
     (async () => {
-      for (let i = 0; i < doc.page_count; i++) {
-        if (docStore.doc?.id !== doc.id || docStore.renderVersion !== ver) return;
+      for (let i = start; i < end; i++) {
+        if (cancelled) return;
         const r = await api.renderPage(doc.id, i, THUMB_SCALE, 0).catch(() => null);
+        if (cancelled || docStore.doc?.id !== doc.id || docStore.renderVersion !== ver) return;
         if (r) thumbs = { ...thumbs, [i]: `data:image/png;base64,${r.png_base64}` };
       }
     })();
+    return () => { cancelled = true; };
   });
 
   // Search
@@ -161,9 +171,12 @@
   <aside class="flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-neutral-300 bg-neutral-50 text-neutral-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100">
     {#if docStore.navPanel === "thumbnails"}
       <div class={head}>Pages</div>
-      <div class="flex-1 overflow-auto p-2">
-        {#each docStore.doc.pages as p (p.index)}
+      {#key thumbSession}
+      <div class="flex-1 overflow-auto p-2" bind:clientHeight={thumbHeight} onscroll={(e) => (thumbScroll = e.currentTarget.scrollTop)}>
+        <div style="height:{thumbStart * THUMB_ROW}px" aria-hidden="true"></div>
+        {#each docStore.doc.pages.slice(thumbStart, thumbEnd) as p (p.index)}
           <button
+            style="height:{THUMB_ROW - 12}px"
             class="mb-3 block w-full rounded p-1 text-center hover:bg-neutral-200 dark:hover:bg-neutral-700 {docStore.currentPage === p.index ? 'ring-2 ring-blue-500' : ''}"
             onclick={() => onGoToPage(p.index)}
             aria-current={docStore.currentPage === p.index ? "page" : undefined}
@@ -176,7 +189,9 @@
             <div class="mt-1 text-xs">{p.index + 1}</div>
           </button>
         {/each}
+        <div style="height:{(docStore.doc.page_count - thumbEnd) * THUMB_ROW}px" aria-hidden="true"></div>
       </div>
+      {/key}
     {:else if docStore.navPanel === "bookmarks"}
       <div class={head}>Bookmarks</div>
       <div class="flex-1 overflow-auto p-1">

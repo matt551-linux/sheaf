@@ -94,6 +94,28 @@ fn renders_page_to_png() {
 }
 
 #[test]
+fn render_downscales_to_pixel_budget() {
+    // A4 at 16x would be 9520x13472 = ~128M pixels (~1 GB of transient
+    // buffers). The engine must downscale to its pixel budget instead.
+    let e = engine();
+    let info = e.open(fixtures().join("sample.pdf"), None).unwrap();
+    let r = e.render(info.id, 0, 16.0, 0).unwrap();
+    let px = r.width_px as u64 * r.height_px as u64;
+    assert!(
+        px <= 32_000_000,
+        "render exceeded pixel budget: {}x{} = {px}",
+        r.width_px,
+        r.height_px
+    );
+    // Still a real render at the largest size the budget allows.
+    assert!(px > 24_000_000, "unexpectedly small render: {px}");
+    // Aspect ratio preserved (A4 is 595x842).
+    let ratio = r.width_px as f64 / r.height_px as f64;
+    assert!((ratio - 595.0 / 842.0).abs() < 0.01, "aspect drifted: {ratio}");
+    e.close(info.id).unwrap();
+}
+
+#[test]
 fn extracts_text_and_searches() {
     let e = engine();
     let info = e.open(fixtures().join("sample.pdf"), None).unwrap();

@@ -14,7 +14,14 @@
   let scrollTop = $state(0);
   let images = $state<Record<number, string>>({});
   let renderGen = 0;
-  let pageViews: Record<number, PageView> = {};
+  let pageViews = $state<Record<number, PageView>>({});
+
+  const session = $derived(docStore.doc?.id);
+  $effect(() => {
+    void session;
+    scrollTop = 0;
+    if (scroller) scroller.scrollTop = 0;
+  });
 
   const layout = $derived(docStore.layout);
   const height = $derived(totalHeight(layout));
@@ -29,17 +36,19 @@
     void scale;
     void rot;
     void ver;
-    if (!doc) {
-      images = {};
-      return;
-    }
+    // Only retain the active window. Async completions below are not effect
+    // dependencies; never synchronously read images here (a feedback loop).
+    images = {};
+    if (!doc) return;
     const gen = ++renderGen;
     for (const i of idx) {
       docStore.pageImage(i).then((url) => {
         if (gen !== renderGen) return;
         images = { ...images, [i]: url };
-      });
+      }).catch(() => {});
     }
+    // Also discard late results on close/unmount, not only the next render.
+    return () => { renderGen++; };
   });
 
   onMount(() => {
@@ -119,7 +128,7 @@
 >
   {#if docStore.doc}
     <div class="relative mx-auto" style="height:{height}px; width:100%">
-      {#each layout as l (l.index)}
+      {#each layout.filter((l) => visible.includes(l.index)) as l (l.index)}
         <PageView bind:this={pageViews[l.index]} layout={l} image={images[l.index]} {onOpenNote} />
       {/each}
     </div>

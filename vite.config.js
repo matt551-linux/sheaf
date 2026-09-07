@@ -2,12 +2,13 @@ import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
   plugins: [tailwindcss(), sveltekit()],
   clearScreen: false,
+  // Component regression tests must run Svelte's client effects, not SSR stubs.
+  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
   server: {
     port: 1420,
     strictPort: true,

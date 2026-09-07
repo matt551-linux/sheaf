@@ -684,6 +684,15 @@ fn bind_pdfium(library_dir: Option<&Path>) -> Result<Box<dyn PdfiumLibraryBindin
 // ---------- Engine thread state ----------
 
 const MAX_UNDO: usize = 40;
+/// `info()` loads pages to report per-page rotation (display metadata). On
+/// documents larger than this, skip that O(pages) work: opening must not load
+/// every page.
+const ROTATION_EAGER_PAGE_LIMIT: u16 = 512;
+/// Hard budget for a single rendered bitmap, in pixels. Render allocates
+/// roughly 8 bytes per pixel transiently (BGRA bitmap + RGBA copy) before PNG
+/// encoding, so 32M pixels bounds the transient cost to ~256 MB worst case.
+/// Requests above the budget are downscaled, not failed.
+const MAX_RENDER_PIXELS: i64 = 32_000_000;
 
 pub(crate) struct OpenDoc {
     /// The bytes PDFium is reading from. Must outlive `handle`.
@@ -994,6 +1003,20 @@ impl EngineState {
         })
     }
 
+    /// Load a page without notifying the form environment. Cheaper for
+    /// metadata-only reads (rotation): skips widget wiring entirely.
+    fn page_no_form(&self, d: &OpenDoc, index: u16) -> Result<PageGuard<'_>> {
+        let page = unsafe { self.b.FPDF_LoadPage(d.handle, index as i32) };
+        if page.is_null() {
+            return Err(SheafError::NoSuchPage(index));
+        }
+        Ok(PageGuard {
+            b: self.b.as_ref(),
+            form: std::ptr::null_mut(),
+            page,
+        })
+    }
+
     fn meta(&self, d: &OpenDoc, tag: &str) -> Option<String> {
         let b = &self.b;
         let len = unsafe { b.FPDF_GetMetaText(d.handle, tag, std::ptr::null_mut(), 0) };
@@ -1021,11 +1044,18 @@ impl EngineState {
                 height: 0.0,
             };
             unsafe { b.FPDF_GetPageSizeByIndexF(d.handle, i as i32, &mut size) };
-            // Rotation needs a loaded page; cheap enough for typical documents.
-            let rotation = self
-                .page(d, i)
-                .map(|p| unsafe { b.FPDFPage_GetRotation(p.page) } * 90)
-                .unwrap_or(0) as u16;
+            // Rotation needs a loaded page. Width/height above are already
+            // post-rotation, and per-page rotation is display metadata only,
+            // so skip the O(pages) load work on very large documents: opening
+            // used to load (and form-scan) every page, which froze the app and
+            // spiked memory on big files.
+            let rotation = if count <= ROTATION_EAGER_PAGE_LIMIT {
+                self.page_no_form(d, i)
+                    .map(|p| unsafe { b.FPDFPage_GetRotation(p.page) } * 90)
+                    .unwrap_or(0) as u16
+            } else {
+                0
+            };
             pages.push(PageInfo {
                 index: i,
                 width: size.width,
@@ -1100,6 +1130,16 @@ impl EngineState {
         let ph = unsafe { b.FPDF_GetPageHeightF(p.page) };
         let rot = ((rotation % 360) / 90) as i32;
         let (w, h) = if rot % 2 == 1 { (ph, pw) } else { (pw, ph) };
+        // A scale cap alone does not bound memory: page dimensions are
+        // unbounded, and the render path holds ~8 bytes/pixel transiently
+        // (BGRA bitmap + RGBA copy). Downscale oversized requests so one
+        // render can never demand an extreme allocation.
+        let px = (w as f64 * scale as f64) * (h as f64 * scale as f64);
+        let scale = if px > MAX_RENDER_PIXELS as f64 {
+            scale * (MAX_RENDER_PIXELS as f64 / px).sqrt() as f32
+        } else {
+            scale
+        };
         let w = ((w * scale).round() as i32).max(1);
         let h = ((h * scale).round() as i32).max(1);
 
