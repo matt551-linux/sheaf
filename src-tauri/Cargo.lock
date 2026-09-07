@@ -5202,6 +5202,7 @@ dependencies = [
  "tauri-plugin-updater",
  "thiserror 2.0.20",
  "ureq",
+ "winreg",
  "x509-cert 0.2.5",
  "x509-parser 0.16.0",
 ]

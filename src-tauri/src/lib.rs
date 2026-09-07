@@ -3,9 +3,11 @@ mod desktop_integration;
 pub mod edit;
 pub mod engine;
 mod error;
+mod local_data;
 pub mod security;
 pub mod textedit;
 pub mod tools;
+mod windows_install;
 
 use std::path::PathBuf;
 
@@ -151,6 +153,9 @@ pub fn run() {
             commands::install_desktop_integration,
             commands::remove_desktop_integration,
             commands::uninstall_appimage,
+            commands::windows_install_status,
+            commands::open_windows_installed_apps,
+            commands::delete_local_app_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");
