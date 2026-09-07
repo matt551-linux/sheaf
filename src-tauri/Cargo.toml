@@ -45,6 +45,10 @@ ureq = { version = "3", default-features = false, features = ["native-tls", "gzi
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "system-proxy", "zip"] }
 tauri-plugin-process = "2.3.1"
 
+[target.'cfg(windows)'.dependencies]
+# Read the standard Uninstall registry keys to tell installed builds from portable ones.
+winreg = "0.55"
+
 [features]
 default = ["ocr-download"]
 # Fetch OCR models over HTTPS (native TLS: SChannel / Security.framework / OpenSSL).

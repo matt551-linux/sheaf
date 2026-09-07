@@ -218,7 +218,25 @@ class DocumentStore {
     this.applyTheme();
   }
 
+  /** Set once local data has been deleted so nothing is written back. */
+  private prefsClosed = false;
+
+  /**
+   * Detach the preferences store before its directory is deleted. The store
+   * plugin flushes every open store on exit; closing it first keeps a deleted
+   * app-data directory deleted.
+   */
+  async closePrefs() {
+    this.prefsClosed = true;
+    try {
+      await prefs.close();
+    } catch {
+      /* already closed or never opened */
+    }
+  }
+
   private async savePrefs() {
+    if (this.prefsClosed) return;
     try {
       await prefs.set("recents", $state.snapshot(this.recents));
       await prefs.set("appImageIntegrationPromptDismissed", this.appImageIntegrationPromptDismissed);

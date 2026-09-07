@@ -528,3 +528,32 @@ pub async fn uninstall_appimage(app: AppHandle, delete_data: bool) -> Result<()>
     let app_data = app.path().app_data_dir().ok();
     crate::desktop_integration::uninstall(delete_data, app_data)
 }
+
+// ---------- Windows installation and local data ----------
+
+#[tauri::command]
+pub async fn windows_install_status(app: AppHandle) -> Result<crate::windows_install::WindowsInstallStatus> {
+    Ok(crate::windows_install::status(app.path().app_data_dir().ok()))
+}
+
+#[tauri::command]
+pub async fn open_windows_installed_apps() -> Result<()> {
+    crate::windows_install::open_installed_apps()
+}
+
+/// Remove only Sheaf's app-data directory (preferences, recents, OCR models,
+/// signing identities). Never touches user documents. The frontend closes
+/// the app immediately afterwards so nothing is written back.
+#[tauri::command]
+pub async fn delete_local_app_data(app: AppHandle) -> Result<crate::local_data::LocalDataRemoval> {
+    if crate::local_data::is_dev_build() {
+        return Err(crate::error::SheafError::Engine(
+            "local data removal is unavailable in development builds".into(),
+        ));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::error::SheafError::Engine(format!("app data dir: {e}")))?;
+    crate::local_data::delete_app_data(&dir, &app.config().identifier)
+}

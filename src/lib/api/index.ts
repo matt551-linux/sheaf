@@ -338,6 +338,21 @@ export interface DesktopIntegrationStatus {
   is_default_pdf: boolean;
 }
 
+/** Windows: how the running executable relates to a registered install. */
+export type WindowsInstallContext = "installed" | "portable" | "dev";
+export interface WindowsInstallStatus {
+  supported: boolean;
+  context: WindowsInstallContext;
+  install_location: string | null;
+  installed_version: string | null;
+  app_data_dir: string | null;
+  app_data_present: boolean;
+}
+export interface LocalDataRemoval {
+  path: string;
+  removed: boolean;
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -442,4 +457,7 @@ export const api = {
   installDesktopIntegration: () => invoke<DesktopIntegrationStatus>("install_desktop_integration"),
   removeDesktopIntegration: () => invoke<DesktopIntegrationStatus>("remove_desktop_integration"),
   uninstallAppImage: (deleteData: boolean) => invoke<void>("uninstall_appimage", { deleteData }),
+  windowsInstallStatus: () => invoke<WindowsInstallStatus>("windows_install_status"),
+  openWindowsInstalledApps: () => invoke<void>("open_windows_installed_apps"),
+  deleteLocalAppData: () => invoke<LocalDataRemoval>("delete_local_app_data"),
 };
