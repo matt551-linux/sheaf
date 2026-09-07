@@ -338,6 +338,15 @@ export interface DesktopIntegrationStatus {
   is_default_pdf: boolean;
 }
 
+export interface MacosInstallStatus {
+  supported: boolean;
+  app_bundle_path: string | null;
+  is_dev_checkout: boolean;
+  is_running_from_disk_image: boolean;
+  can_move_to_trash: boolean;
+  app_data_path: string | null;
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -442,4 +451,8 @@ export const api = {
   installDesktopIntegration: () => invoke<DesktopIntegrationStatus>("install_desktop_integration"),
   removeDesktopIntegration: () => invoke<DesktopIntegrationStatus>("remove_desktop_integration"),
   uninstallAppImage: (deleteData: boolean) => invoke<void>("uninstall_appimage", { deleteData }),
+  macosInstallStatus: () => invoke<MacosInstallStatus>("macos_install_status"),
+  uninstallMacosApp: (deleteData: boolean) => invoke<void>("uninstall_macos_app", { deleteData }),
+  deleteLocalData: () => invoke<void>("delete_local_data"),
+  revealAppInFinder: () => invoke<void>("reveal_app_in_finder"),
 };
