@@ -21,8 +21,9 @@
     onExportImages: () => void;
     onExportText: () => void;
     onCheckUpdates: () => void;
+    onDesktopIntegration: () => void;
   }
-  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity, onEdit, onTools, onCreateFromImages, onExportImages, onExportText, onCheckUpdates }: Props = $props();
+  let { onGoToPage, onOpen, onSave, onSaveAs, onPrint, onProperties, onExportForm, onImportForm, onValidateForm, onOrganize, onSecurity, onEdit, onTools, onCreateFromImages, onExportImages, onExportText, onCheckUpdates, onDesktopIntegration }: Props = $props();
 
   let pageInput = $state("1");
   $effect(() => {
@@ -98,6 +99,7 @@
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onExportText())}>Export text…</button>
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" onclick={() => (close(), onCheckUpdates())}>Check for updates…</button>
+        <button class={item} role="menuitem" onclick={() => (close(), onDesktopIntegration())}>Desktop integration…</button>
         <div class="my-1 h-px bg-neutral-200 dark:bg-neutral-700"></div>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onValidateForm())}>Validate form</button>
         <button class={item} role="menuitem" disabled={!hasDoc} onclick={() => (close(), onImportForm())}>Import form data…</button>

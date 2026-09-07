@@ -1,4 +1,5 @@
 mod commands;
+mod desktop_integration;
 pub mod edit;
 pub mod engine;
 mod error;
@@ -146,6 +147,10 @@ pub fn run() {
             commands::ocr_download_models,
             commands::ocr_pages,
             commands::accessibility_report,
+            commands::desktop_integration_status,
+            commands::install_desktop_integration,
+            commands::remove_desktop_integration,
+            commands::uninstall_appimage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

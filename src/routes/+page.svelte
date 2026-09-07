@@ -14,6 +14,7 @@
   import EditPanel from "$lib/components/EditPanel.svelte";
   import ToolsPanel from "$lib/components/ToolsPanel.svelte";
   import UpdateBanner from "$lib/components/UpdateBanner.svelte";
+  import DesktopIntegrationDialog from "$lib/components/DesktopIntegrationDialog.svelte";
   import { updater } from "$lib/stores/updater.svelte";
   import PropertiesDialog from "$lib/components/PropertiesDialog.svelte";
   import { docStore, type Tool } from "$lib/stores/document.svelte";
@@ -27,6 +28,8 @@
   let showOrganize = $state(false);
   let securityTab = $state<"sign" | "signatures" | "protect" | null>(null);
   let showEdit = $state(false);
+  let showDesktopIntegration = $state(false);
+  let desktopIntegrationFirstRun = $state(false);
   let toolsTab = $state<"redact" | "compare" | "ocr" | "access" | null>(null);
 
   async function createFromImages() {
@@ -262,7 +265,19 @@
     setTimeout(() => void updater.checkNow(false), 4000);
     void docStore
       .loadPrefs()
-      .then(() => api.launchFiles())
+      .then(async () => {
+        const integration = await api.desktopIntegrationStatus().catch(() => null);
+        if (
+          integration?.supported &&
+          integration.is_appimage &&
+          !integration.integrated &&
+          !docStore.appImageIntegrationPromptDismissed
+        ) {
+          desktopIntegrationFirstRun = true;
+          showDesktopIntegration = true;
+        }
+        return api.launchFiles();
+      })
       .then((files) => {
         if (files[0]) void docStore.open(files[0]);
       });
@@ -302,7 +317,7 @@
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-neutral-200 dark:bg-neutral-800">
   <UpdateBanner />
-  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (toolsTab = null), (securityTab = t))} onEdit={() => ((securityTab = null), (toolsTab = null), (showEdit = !showEdit))} onTools={(t) => ((securityTab = null), (showEdit = false), (toolsTab = t))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} onCheckUpdates={() => updater.checkNow(true).then(() => { if (updater.state.kind === "none") docStore.showToast("Sheaf is up to date"); })} />
+  <Toolbar onGoToPage={goToPage} onOpen={openDialog} onSave={doSave} onSaveAs={() => saveAs()} onPrint={print} onProperties={() => (showProps = true)} onExportForm={exportFormData} onImportForm={importFormData} onValidateForm={validateForm} onOrganize={() => (showOrganize = true)} onSecurity={(t) => ((showEdit = false), (toolsTab = null), (securityTab = t))} onEdit={() => ((securityTab = null), (toolsTab = null), (showEdit = !showEdit))} onTools={(t) => ((securityTab = null), (showEdit = false), (toolsTab = t))} onCreateFromImages={createFromImages} onExportImages={exportImages} onExportText={exportText} onCheckUpdates={() => updater.checkNow(true).then(() => { if (updater.state.kind === "none") docStore.showToast("Sheaf is up to date"); })} onDesktopIntegration={() => ((desktopIntegrationFirstRun = false), (showDesktopIntegration = true))} />
   <div class="flex min-h-0 flex-1">
     <NavPanel bind:this={nav} onGoToPage={goToPage} onOpenNote={(a) => (noteTarget = a)} />
     <div class="relative min-w-0 flex-1">
@@ -380,4 +395,14 @@
       <ToolsPanel initialTab={toolsTab} onClose={() => (toolsTab = null)} />
     {/if}
   </div>
+  {#if showDesktopIntegration}
+    <DesktopIntegrationDialog
+      firstRun={desktopIntegrationFirstRun}
+      onClose={(dontAskAgain) => {
+        if (dontAskAgain) docStore.dismissAppImageIntegrationPrompt();
+        showDesktopIntegration = false;
+        desktopIntegrationFirstRun = false;
+      }}
+    />
+  {/if}
 </div>

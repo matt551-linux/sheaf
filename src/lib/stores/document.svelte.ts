@@ -99,6 +99,8 @@ class DocumentStore {
   currentPage = $state(0);
   navPanel = $state<NavPanel>("thumbnails");
   recents = $state<string[]>([]);
+  /** User opted out of the first-run AppImage desktop integration prompt. */
+  appImageIntegrationPromptDismissed = $state(false);
 
   tool = $state<Tool>("select");
   styles = $state<Record<Tool, ToolStyle>>(structuredClone(DEFAULT_STYLES));
@@ -203,6 +205,7 @@ class DocumentStore {
   async loadPrefs() {
     try {
       this.recents = ((await prefs.get<string[]>("recents")) ?? []).slice(0, 10);
+      this.appImageIntegrationPromptDismissed = (await prefs.get<boolean>("appImageIntegrationPromptDismissed")) ?? false;
       this.theme = (await prefs.get<Theme>("theme")) ?? this.theme;
       this.author = (await prefs.get<string>("author")) ?? "";
       const styles = await prefs.get<Partial<Record<Tool, ToolStyle>>>("styles");
@@ -218,6 +221,7 @@ class DocumentStore {
   private async savePrefs() {
     try {
       await prefs.set("recents", $state.snapshot(this.recents));
+      await prefs.set("appImageIntegrationPromptDismissed", this.appImageIntegrationPromptDismissed);
       await prefs.set("theme", this.theme);
       await prefs.set("author", this.author);
       await prefs.set("styles", $state.snapshot(this.styles));
@@ -239,6 +243,10 @@ class DocumentStore {
   }
   setAuthor(a: string) {
     this.author = a;
+    void this.savePrefs();
+  }
+  dismissAppImageIntegrationPrompt() {
+    this.appImageIntegrationPromptDismissed = true;
     void this.savePrefs();
   }
   setStyle(tool: Tool, patch: Partial<ToolStyle>) {

@@ -505,3 +505,26 @@ pub async fn ocr_pages(app: AppHandle, engine: State<'_, Engine>, id: u32, pages
 pub async fn accessibility_report(engine: State<'_, Engine>, id: u32) -> Result<AccessibilityReport> {
     engine.accessibility_report(id)
 }
+
+// ---------- AppImage desktop integration (Linux) ----------
+
+#[tauri::command]
+pub async fn desktop_integration_status() -> Result<crate::desktop_integration::DesktopIntegrationStatus> {
+    crate::desktop_integration::status()
+}
+
+#[tauri::command]
+pub async fn install_desktop_integration() -> Result<crate::desktop_integration::DesktopIntegrationStatus> {
+    crate::desktop_integration::install()
+}
+
+#[tauri::command]
+pub async fn remove_desktop_integration() -> Result<crate::desktop_integration::DesktopIntegrationStatus> {
+    crate::desktop_integration::remove_integration()
+}
+
+#[tauri::command]
+pub async fn uninstall_appimage(app: AppHandle, delete_data: bool) -> Result<()> {
+    let app_data = app.path().app_data_dir().ok();
+    crate::desktop_integration::uninstall(delete_data, app_data)
+}

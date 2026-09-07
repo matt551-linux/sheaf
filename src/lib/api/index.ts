@@ -330,6 +330,14 @@ export interface AccessibilityReport {
   issues: string[];
 }
 
+export interface DesktopIntegrationStatus {
+  supported: boolean;
+  is_appimage: boolean;
+  integrated: boolean;
+  appimage_path: string | null;
+  is_default_pdf: boolean;
+}
+
 export function isSheafError(e: unknown): e is SheafError {
   return typeof e === "object" && e !== null && "kind" in e && "message" in e;
 }
@@ -430,4 +438,8 @@ export const api = {
   ocrDownloadModels: () => invoke<void>("ocr_download_models"),
   ocrPages: (id: number, pages: number[], dpi = 200) => invoke<OcrResult>("ocr_pages", { id, pages, dpi }),
   accessibilityReport: (id: number) => invoke<AccessibilityReport>("accessibility_report", { id }),
+  desktopIntegrationStatus: () => invoke<DesktopIntegrationStatus>("desktop_integration_status"),
+  installDesktopIntegration: () => invoke<DesktopIntegrationStatus>("install_desktop_integration"),
+  removeDesktopIntegration: () => invoke<DesktopIntegrationStatus>("remove_desktop_integration"),
+  uninstallAppImage: (deleteData: boolean) => invoke<void>("uninstall_appimage", { deleteData }),
 };
