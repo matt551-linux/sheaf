@@ -1,5 +1,6 @@
 mod commands;
 mod desktop_integration;
+mod macos_uninstall;
 pub mod edit;
 pub mod engine;
 mod error;
@@ -156,6 +157,10 @@ pub fn run() {
             commands::windows_install_status,
             commands::open_windows_installed_apps,
             commands::delete_local_app_data,
+            commands::macos_install_status,
+            commands::uninstall_macos_app,
+            commands::delete_local_data,
+            commands::reveal_app_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sheaf");

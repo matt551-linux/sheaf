@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { flushSync, mount, unmount } from "svelte";
 import DesktopIntegrationDialog from "./DesktopIntegrationDialog.svelte";
 import { docStore } from "$lib/stores/document.svelte";
-import { api, type DesktopIntegrationStatus, type WindowsInstallStatus } from "$lib/api";
+import { api, type DesktopIntegrationStatus, type MacosInstallStatus, type WindowsInstallStatus } from "$lib/api";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -16,6 +16,7 @@ vi.mock("$lib/api", async (original) => ({
   api: {
     desktopIntegrationStatus: vi.fn(),
     windowsInstallStatus: vi.fn(),
+    macosInstallStatus: vi.fn(),
     openWindowsInstalledApps: vi.fn(async () => {}),
     deleteLocalAppData: vi.fn(async () => ({ path: "C:\\Users\\alice\\AppData\\Roaming\\org.sheafpdf.sheaf", removed: true })),
     uninstallAppImage: vi.fn(async () => {}),
@@ -42,6 +43,16 @@ function windowsStatus(patch: Partial<WindowsInstallStatus> = {}): WindowsInstal
     ...patch,
   };
 }
+function macosUnsupported(): MacosInstallStatus {
+  return {
+    supported: false,
+    app_bundle_path: null,
+    is_dev_checkout: false,
+    is_running_from_disk_image: false,
+    can_move_to_trash: false,
+    app_data_path: null,
+  };
+}
 
 let component: ReturnType<typeof mount> | undefined;
 let target: HTMLDivElement;
@@ -56,6 +67,7 @@ async function settle() {
 async function open(status: WindowsInstallStatus | null, desktop = linuxUnsupported) {
   vi.mocked(api.desktopIntegrationStatus).mockResolvedValue(desktop);
   vi.mocked(api.windowsInstallStatus).mockResolvedValue(status ?? windowsStatus({ supported: false }));
+  vi.mocked(api.macosInstallStatus).mockResolvedValue(macosUnsupported());
   component = mount(DesktopIntegrationDialog, { target, props: { onClose } });
   await settle();
 }

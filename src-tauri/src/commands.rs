@@ -557,3 +557,31 @@ pub async fn delete_local_app_data(app: AppHandle) -> Result<crate::local_data::
         .map_err(|e| crate::error::SheafError::Engine(format!("app data dir: {e}")))?;
     crate::local_data::delete_app_data(&dir, &app.config().identifier)
 }
+
+// ---------- .app bundle uninstall (macOS) ----------
+
+#[tauri::command]
+pub async fn macos_install_status(app: AppHandle) -> Result<crate::macos_uninstall::MacosInstallStatus> {
+    Ok(crate::macos_uninstall::status(app.path().app_data_dir().ok()))
+}
+
+/// Move the running Sheaf.app to the Trash. The frontend quits Sheaf right
+/// after this resolves; the user has already confirmed the destructive step.
+#[tauri::command]
+pub async fn uninstall_macos_app(app: AppHandle, delete_data: bool) -> Result<()> {
+    let app_data = app.path().app_data_dir().ok();
+    crate::macos_uninstall::uninstall(delete_data, app_data)
+}
+
+/// Delete only Sheaf's local data (preferences, recents, OCR models,
+/// identities). Never touches the installation or any user document.
+#[tauri::command]
+pub async fn delete_local_data(app: AppHandle) -> Result<()> {
+    let app_data = app.path().app_data_dir().ok();
+    crate::macos_uninstall::delete_local_data(app_data)
+}
+
+#[tauri::command]
+pub async fn reveal_app_in_finder() -> Result<()> {
+    crate::macos_uninstall::reveal_in_finder()
+}
