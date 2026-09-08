@@ -963,7 +963,7 @@ fn m6b_text_blocks_group_lines_and_reflow() {
 
     // Edit the paragraph as one piece: shorter text should reflow to fewer lines.
     engine
-        .set_text_block(id, 0, BlockEdit { id: para.id, text: "Short now.".into(), width: None, dx: 0.0, dy: 0.0, font_size: None })
+        .set_text_block(id, 0, BlockEdit { id: para.id, text: "Short now.".into(), width: None, dx: 0.0, dy: 0.0, font_size: None, ..Default::default() })
         .unwrap();
     let blocks = engine.list_text_blocks(id, 0).unwrap();
     let para2 = blocks.iter().find(|b| b.text == "Short now.").expect("edited block");
@@ -974,7 +974,7 @@ fn m6b_text_blocks_group_lines_and_reflow() {
     // Longer text wraps within the original width and keeps the leading.
     let long = "Now a much longer replacement paragraph that certainly needs to wrap onto several lines to fit the width.";
     engine
-        .set_text_block(id, 0, BlockEdit { id: para2.id, text: long.into(), width: Some(para.rect.w), dx: 0.0, dy: 0.0, font_size: None })
+        .set_text_block(id, 0, BlockEdit { id: para2.id, text: long.into(), width: Some(para.rect.w), dx: 0.0, dy: 0.0, font_size: None, ..Default::default() })
         .unwrap();
     let blocks = engine.list_text_blocks(id, 0).unwrap();
     let para3 = blocks.iter().find(|b| b.text.starts_with("Now a much")).expect("wrapped block");
@@ -988,5 +988,75 @@ fn m6b_text_blocks_group_lines_and_reflow() {
     engine.undo(id).unwrap();
     let blocks = engine.list_text_blocks(id, 0).unwrap();
     assert!(blocks.iter().any(|b| b.text.starts_with("The quick brown fox")));
+    engine.close(id).unwrap();
+}
+
+#[test]
+fn text_block_formatting() {
+    let engine = engine();
+    let info = engine.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+
+    engine
+        .add_text(
+            id,
+            0,
+            sheaf_lib::edit::TextSpec { text: "Plain paragraph text.".into(), x: 72.0, y: 500.0, font: "Helvetica".into(), font_size: 12.0, color: None },
+        )
+        .unwrap();
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let para = blocks.iter().find(|b| b.text.starts_with("Plain paragraph")).expect("paragraph block");
+    assert!(!para.bold && !para.italic, "plain Helvetica should not be flagged bold/italic");
+
+    // Bold + centered + underlined + red, within a fixed width.
+    let width = 200.0f32;
+    let info = engine
+        .set_text_block(
+            id,
+            0,
+            sheaf_lib::textedit::BlockEdit {
+                id: para.id,
+                text: "Bold centered.".into(),
+                width: Some(width),
+                dx: 0.0,
+                dy: 0.0,
+                font_size: None,
+                bold: Some(true),
+                italic: Some(false),
+                underline: Some(true),
+                align: Some("center".into()),
+                color: Some(sheaf_lib::engine::Color { r: 200, g: 20, b: 20 }),
+                font_family: Some("Helvetica".into()),
+            },
+        )
+        .unwrap();
+    assert!(info.can_undo);
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let styled = blocks.iter().find(|b| b.text == "Bold centered.").expect("styled block");
+    assert!(styled.bold, "block should now report bold");
+    assert!(!styled.italic);
+    assert!(styled.font.to_lowercase().contains("bold"), "font name: {}", styled.font);
+    assert_eq!(styled.color, sheaf_lib::engine::Color { r: 200, g: 20, b: 20 });
+    // Centered within the requested width: some left margin present.
+    assert!(styled.rect.x > 72.0 + 1.0, "expected the line to be indented by centering: x={}", styled.rect.x);
+    assert!(styled.rect.w < width, "line width {} should be less than the wrap width {}", styled.rect.w, width);
+
+    // The underline is drawn as an extra filled rect page object alongside
+    // the text run (text_blocks() only tracks text-object indices in
+    // `objects`, so check the page's raw object count instead).
+    let page_objs = engine.list_page_objects(id, 0).unwrap();
+    assert!(
+        page_objs.iter().any(|o| o.kind == "path" || o.kind == "unknown"),
+        "expected an underline rect object on the page: {:?}",
+        page_objs.iter().map(|o| &o.kind).collect::<Vec<_>>()
+    );
+
+    // Render and confirm a red pixel appears where the (bold, red) text sits.
+    let png = engine.render(id, 0, 2.0, 0).unwrap();
+    let cx = (styled.rect.x + styled.rect.w / 2.0) * 2.0;
+    let cy = (png.height_px as f32 - (styled.rect.y + styled.rect.h / 2.0) * 2.0).max(0.0);
+    let px = pixel(&png.png_base64, cx as u32, cy.min(png.height_px as f32 - 1.0) as u32);
+    assert!(px[0] > 100, "expected some red ink near the styled text, got {px:?}");
+
     engine.close(id).unwrap();
 }

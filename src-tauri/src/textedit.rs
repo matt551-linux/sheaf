@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{Color, DocId, DocumentInfo, EngineState, Rect};
+use crate::engine::{Color, DocId, DocumentInfo, EngineState, Rect, FPDF_FILLMODE_WINDING};
 use crate::error::{Result, SheafError};
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,9 +44,12 @@ pub struct TextBlock {
     pub baseline_x: f32,
     pub baseline_y: f32,
     pub line_count: u32,
+    /// Inferred from the dominant run's base font name (e.g. "Helvetica-Bold").
+    pub bold: bool,
+    pub italic: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct BlockEdit {
     pub id: u32,
     pub text: String,
@@ -58,6 +61,59 @@ pub struct BlockEdit {
     #[serde(default)]
     pub dy: f32,
     pub font_size: Option<f32>,
+    /// Formatting overrides. None means "keep what the block already has";
+    /// setting any of these forces a standard-14 font (embedded font glyph
+    /// variants are not reliably selectable through PDFium's public API).
+    #[serde(default)]
+    pub bold: Option<bool>,
+    #[serde(default)]
+    pub italic: Option<bool>,
+    #[serde(default)]
+    pub underline: Option<bool>,
+    /// One of "left", "center", "right". Defaults to "left".
+    #[serde(default)]
+    pub align: Option<String>,
+    #[serde(default)]
+    pub color: Option<Color>,
+    /// One of "Helvetica", "Times", "Courier". Defaults to the block's
+    /// existing family when bold/italic are also unset.
+    #[serde(default)]
+    pub font_family: Option<String>,
+}
+
+/// Map a family + weight/style to one of the PDF standard 14 font names.
+fn standard_font_name(family: &str, bold: bool, italic: bool) -> &'static str {
+    match (family, bold, italic) {
+        ("Times", false, false) => "Times-Roman",
+        ("Times", true, false) => "Times-Bold",
+        ("Times", false, true) => "Times-Italic",
+        ("Times", true, true) => "Times-BoldItalic",
+        ("Courier", false, false) => "Courier",
+        ("Courier", true, false) => "Courier-Bold",
+        ("Courier", false, true) => "Courier-Oblique",
+        ("Courier", true, true) => "Courier-BoldOblique",
+        (_, false, false) => "Helvetica",
+        (_, true, false) => "Helvetica-Bold",
+        (_, false, true) => "Helvetica-Oblique",
+        (_, true, true) => "Helvetica-BoldOblique",
+    }
+}
+
+/// Best-effort family/weight/style guess from a base font name like
+/// "ABCDEF+Times-BoldItalic" or "Helvetica".
+fn infer_style(font_name: &str) -> (String, bool, bool) {
+    let n = font_name.rsplit('+').next().unwrap_or(font_name);
+    let lower = n.to_ascii_lowercase();
+    let family = if lower.contains("times") || lower.contains("serif") || lower.contains("georgia") || lower.contains("garamond") {
+        "Times"
+    } else if lower.contains("courier") || lower.contains("mono") || lower.contains("consolas") {
+        "Courier"
+    } else {
+        "Helvetica"
+    };
+    let bold = lower.contains("bold") || lower.contains("black") || lower.contains("heavy");
+    let italic = lower.contains("italic") || lower.contains("oblique");
+    (family.to_string(), bold, italic)
 }
 
 fn pdf(msg: impl Into<String>) -> SheafError {
@@ -232,6 +288,7 @@ impl EngineState {
             let x1 = blk.iter().map(|l| l.x1).fold(f32::MIN, f32::max);
             let top = blk.iter().flat_map(|l| l.runs.iter()).map(|r| r.rect.y + r.rect.h).fold(f32::MIN, f32::max);
             let bottom = blk.iter().flat_map(|l| l.runs.iter()).map(|r| r.rect.y).fold(f32::MAX, f32::min);
+            let (_, bold, italic) = infer_style(&dom.font_name);
             out.push(TextBlock {
                 id: bi as u32,
                 rect: Rect { x: x0, y: bottom, w: x1 - x0, h: top - bottom },
@@ -244,6 +301,8 @@ impl EngineState {
                 baseline_x: first.runs[0].ox.min(x0),
                 baseline_y: first.y,
                 line_count: blk.len() as u32,
+                bold,
+                italic,
             });
         }
         Ok(out)
@@ -257,12 +316,23 @@ impl EngineState {
         let runs = self.runs(id, index)?;
         let src = runs.iter().find(|r| r.index == blk.objects[0]).ok_or_else(|| pdf("block run vanished"))?;
         let font_handle = src.font;
-        let color = src.color;
+        let color = edit.color.unwrap_or(src.color);
         let size = edit.font_size.unwrap_or(blk.font_size).max(1.0);
         let leading = if edit.font_size.is_some() { size * (blk.leading / blk.font_size).max(1.0) } else { blk.leading };
         let width = edit.width.unwrap_or(blk.rect.w).max(size);
         let x = blk.baseline_x + edit.dx;
         let y0 = blk.baseline_y + edit.dy;
+        let align = edit.align.as_deref().unwrap_or("left");
+        let underline = edit.underline.unwrap_or(false);
+        // Any explicit style override forces a standard-14 font: embedded
+        // fonts do not expose selectable bold/italic glyph variants through
+        // PDFium's public API, so the only reliable way to render "actually
+        // bold" text is to switch to a standard font that has that variant.
+        let force_standard = edit.bold.is_some() || edit.italic.is_some() || edit.font_family.is_some();
+        let (orig_family, orig_bold, orig_italic) = infer_style(&src.font_name);
+        let want_family = edit.font_family.as_deref().unwrap_or(&orig_family).to_string();
+        let want_bold = edit.bold.unwrap_or(orig_bold);
+        let want_italic = edit.italic.unwrap_or(orig_italic);
         drop(runs);
 
         self.checkpoint(id)?;
@@ -270,11 +340,14 @@ impl EngineState {
         let b = self.b.as_ref();
         let p = self.page(d, index)?;
 
-        // Prefer the original font; fall back to Helvetica when it cannot
-        // measure (or lacks glyphs for) the new text.
+        // Prefer the original font unless a style override forces a
+        // standard font, or the original font cannot render the new text.
         let mut font = font_handle;
         let mut fallback = false;
-        if font.is_null() || !can_measure(b, font, size, &edit.text) {
+        if force_standard {
+            font = unsafe { b.FPDFText_LoadStandardFont(d.handle, standard_font_name(&want_family, want_bold, want_italic)) };
+            fallback = true;
+        } else if font.is_null() || !can_measure(b, font, size, &edit.text) {
             font = unsafe { b.FPDFText_LoadStandardFont(d.handle, "Helvetica") };
             fallback = true;
         }
@@ -321,17 +394,38 @@ impl EngineState {
             if line.is_empty() {
                 continue;
             }
+            let line_w = measure(line);
+            let line_x = match align {
+                "center" => x + ((width - line_w) / 2.0).max(0.0),
+                "right" => x + (width - line_w).max(0.0),
+                _ => x,
+            };
             let obj = unsafe { b.FPDFPageObj_CreateTextObj(d.handle, font, size) };
             if obj.is_null() {
                 return Err(pdf("could not create text object"));
             }
             let mut wide: Vec<u16> = line.encode_utf16().collect();
             wide.push(0);
+            let baseline_y = y0 - leading * li as f32;
             unsafe {
                 b.FPDFText_SetText(obj, wide.as_ptr());
                 b.FPDFPageObj_SetFillColor(obj, color.r as u32, color.g as u32, color.b as u32, 255);
-                b.FPDFPageObj_Transform(obj, 1.0, 0.0, 0.0, 1.0, x as f64, (y0 - leading * li as f32) as f64);
+                b.FPDFPageObj_Transform(obj, 1.0, 0.0, 0.0, 1.0, line_x as f64, baseline_y as f64);
                 b.FPDFPage_InsertObject(p.page, obj);
+            }
+            if underline && line_w > 0.0 {
+                // A thin filled rect just below the baseline, scaled to the
+                // font size so it looks right at any size.
+                let thickness = (size * 0.06).max(0.5);
+                let uy = baseline_y - size * 0.08;
+                let rect = unsafe { b.FPDFPageObj_CreateNewRect(line_x, uy, line_w, thickness) };
+                if !rect.is_null() {
+                    unsafe {
+                        b.FPDFPageObj_SetFillColor(rect, color.r as u32, color.g as u32, color.b as u32, 255);
+                        b.FPDFPath_SetDrawMode(rect, FPDF_FILLMODE_WINDING as i32, 0);
+                        b.FPDFPage_InsertObject(p.page, rect);
+                    }
+                }
             }
         }
         unsafe { b.FPDFPage_GenerateContent(p.page) };

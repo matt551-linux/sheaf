@@ -1,12 +1,12 @@
 <script lang="ts">
   // In-place paragraph editor. Overlays the page in edit mode: hover shows
-  // paragraph outlines, click opens a textarea over the paragraph with the
-  // same font size and leading. Ctrl+Enter or clicking away commits;
-  // Escape cancels. Reflow happens in the engine (word wrap to the block's
-  // width), then the page re-renders.
+  // paragraph outlines, click opens a formatting toolbar plus a textarea
+  // over the paragraph with the same font size and leading. Ctrl+Enter or
+  // clicking away commits; Escape cancels. Reflow happens in the engine
+  // (word wrap to the block's width), then the page re-renders.
   import { docStore } from "$lib/stores/document.svelte";
-  import { errorMessage, type TextBlock } from "$lib/api";
-  import { rectToCss, pxPerPt, colorToCss } from "$lib/viewer/geometry";
+  import { errorMessage, type BlockEdit, type Color, type TextBlock } from "$lib/api";
+  import { rectToCss, pxPerPt, colorToCss, colorToHex, hexToColor } from "$lib/viewer/geometry";
 
   interface Props {
     index: number;
@@ -29,26 +29,92 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
+  // Formatting state for the block currently open. Seeded from the block's
+  // inferred style on open; only the fields the user actually touches are
+  // sent as overrides so untouched runs keep their embedded font when
+  // possible (see textedit.rs force_standard).
+  let fmtBold = $state(false);
+  let fmtItalic = $state(false);
+  let fmtUnderline = $state(false);
+  let fmtAlign = $state<"left" | "center" | "right">("left");
+  let fmtFamily = $state<"Helvetica" | "Times" | "Courier">("Helvetica");
+  let fmtSize = $state(12);
+  let fmtColor = $state<Color>({ r: 0, g: 0, b: 0 });
+  // Track which formatting fields the user actively changed this session,
+  // so we only override what was touched.
+  let touched = $state<Set<string>>(new Set());
+
   function begin(b: TextBlock) {
     if (busy) return;
     draft = b.text;
+    fmtBold = b.bold;
+    fmtItalic = b.italic;
+    fmtUnderline = false;
+    fmtAlign = "left";
+    fmtFamily = /times|serif/i.test(b.font) ? "Times" : /courier|mono/i.test(b.font) ? "Courier" : "Helvetica";
+    fmtSize = Math.round(b.font_size * 10) / 10;
+    fmtColor = { ...b.color };
+    touched = new Set();
     docStore.editingBlock = { page: index, id: b.id };
     queueMicrotask(() => {
       ta?.focus();
       ta?.setSelectionRange(draft.length, draft.length);
     });
   }
+
+  function touch(field: string) {
+    touched = new Set(touched).add(field);
+  }
+  function toggleBold() {
+    fmtBold = !fmtBold;
+    touch("bold");
+  }
+  function toggleItalic() {
+    fmtItalic = !fmtItalic;
+    touch("italic");
+  }
+  function toggleUnderline() {
+    fmtUnderline = !fmtUnderline;
+    touch("underline");
+  }
+  function setAlign(a: "left" | "center" | "right") {
+    fmtAlign = a;
+    touch("align");
+  }
+  function setFamily(f: "Helvetica" | "Times" | "Courier") {
+    fmtFamily = f;
+    touch("family");
+  }
+  function setSize(s: number) {
+    fmtSize = s;
+    touch("size");
+  }
+  function setColor(c: Color) {
+    fmtColor = c;
+    touch("color");
+  }
+
   async function commit() {
     const b = editing;
     if (!b || busy) return;
-    if (draft === b.text) {
+    const edit: BlockEdit = { id: b.id, text: draft };
+    if (touched.has("bold") || touched.has("italic") || touched.has("family")) {
+      edit.bold = fmtBold;
+      edit.italic = fmtItalic;
+      edit.font_family = fmtFamily;
+    }
+    if (touched.has("underline")) edit.underline = fmtUnderline;
+    if (touched.has("align")) edit.align = fmtAlign;
+    if (touched.has("size")) edit.font_size = fmtSize;
+    if (touched.has("color")) edit.color = fmtColor;
+    if (draft === b.text && touched.size === 0) {
       docStore.editingBlock = null;
       return;
     }
     busy = true;
     error = null;
     try {
-      await docStore.commitBlock(index, { id: b.id, text: draft });
+      await docStore.commitBlock(index, edit);
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -66,6 +132,15 @@
     } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void commit();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      toggleBold();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+      e.preventDefault();
+      toggleItalic();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+      e.preventDefault();
+      toggleUnderline();
     }
     e.stopPropagation();
   }
@@ -73,8 +148,11 @@
   // Editor box: the block rect plus room for a couple of extra lines so
   // typing more does not immediately clip.
   const box = $derived(editing ? rectToCss(editing.rect, size, zoom, rot) : null);
-  const fontPx = $derived(editing ? editing.font_size * scale : 12);
-  const leadPx = $derived(editing ? editing.leading * scale : 14);
+  const fontPx = $derived(fmtSize * scale);
+  const leadPx = $derived(editing ? (fmtSize / editing.font_size) * editing.leading * scale : 14);
+
+  const tbtn = (on: boolean) =>
+    `flex h-6 w-6 items-center justify-center rounded text-xs font-semibold ${on ? "bg-blue-600 text-white" : "text-neutral-200 hover:bg-neutral-700"}`;
 </script>
 
 {#if docStore.editMode}
@@ -97,19 +175,59 @@
     {#if editing && box}
       <!-- Opaque paper behind the editor so the old text does not ghost
            through; the textarea's text starts exactly where the block's did. -->
-      <div class="absolute" style="left:{box.x - 6}px;top:{box.y - 4}px;width:{Math.max(box.w + 12, 160)}px">
+      <div class="absolute" style="left:{box.x - 6}px;top:{box.y - 4}px;width:{Math.max(box.w + 12, 220)}px" onfocusout={(e) => {
+        const next = (e as FocusEvent).relatedTarget as Node | null;
+        if (next && (e.currentTarget as HTMLElement).contains(next)) return;
+        void commit();
+      }}>
+        <div class="mb-1 flex flex-wrap items-center gap-1 rounded bg-neutral-800 px-1.5 py-1 text-xs text-white shadow" role="toolbar" aria-label="Text formatting" tabindex="-1" onmousedown={(e) => { if ((e.target as HTMLElement).tagName === "BUTTON") e.preventDefault(); }}>
+          <button type="button" class={tbtn(fmtBold)} title="Bold (Ctrl+B)" onclick={toggleBold}><b>B</b></button>
+          <button type="button" class="{tbtn(fmtItalic)} italic" title="Italic (Ctrl+I)" onclick={toggleItalic}><i>I</i></button>
+          <button type="button" class="{tbtn(fmtUnderline)} underline" title="Underline (Ctrl+U)" onclick={toggleUnderline}>U</button>
+          <span class="mx-0.5 h-4 w-px bg-neutral-600"></span>
+          <button type="button" class={tbtn(fmtAlign === "left")} title="Align left" onclick={() => setAlign("left")}>≡</button>
+          <button type="button" class={tbtn(fmtAlign === "center")} title="Align center" onclick={() => setAlign("center")}>≣</button>
+          <button type="button" class={tbtn(fmtAlign === "right")} title="Align right" onclick={() => setAlign("right")}>☰</button>
+          <span class="mx-0.5 h-4 w-px bg-neutral-600"></span>
+          <select
+            class="h-6 rounded border-0 bg-neutral-700 px-1 text-xs"
+            value={fmtFamily}
+            onchange={(e) => setFamily((e.currentTarget as HTMLSelectElement).value as typeof fmtFamily)}
+            aria-label="Font family"
+          >
+            <option value="Helvetica">Helvetica</option>
+            <option value="Times">Times</option>
+            <option value="Courier">Courier</option>
+          </select>
+          <input
+            type="number"
+            min="4"
+            max="144"
+            step="0.5"
+            class="h-6 w-14 rounded border-0 bg-neutral-700 px-1 text-xs"
+            value={fmtSize}
+            onchange={(e) => setSize(parseFloat((e.currentTarget as HTMLInputElement).value) || fmtSize)}
+            aria-label="Font size"
+          />
+          <input
+            type="color"
+            class="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0"
+            value={colorToHex(fmtColor)}
+            oninput={(e) => setColor(hexToColor((e.currentTarget as HTMLInputElement).value))}
+            aria-label="Text color"
+          />
+        </div>
         <textarea
           bind:this={ta}
           bind:value={draft}
           class="block w-full resize-none rounded-sm border-2 border-blue-500 shadow-lg outline-none {docStore.nightMode ? 'bg-black' : 'bg-white'}"
-          style="padding:2px 4px;font-size:{fontPx}px;line-height:{leadPx}px;min-height:{box.h + leadPx * 2 + 8}px;color:{docStore.nightMode ? '#fff' : colorToCss(editing.color)};font-family:Helvetica, Arial, sans-serif;font-weight:{/bold/i.test(editing.font) ? 700 : 400};font-style:{/italic|oblique/i.test(editing.font) ? 'italic' : 'normal'}"
+          style="padding:2px 4px;font-size:{fontPx}px;line-height:{leadPx}px;min-height:{box.h + leadPx * 2 + 8}px;color:{docStore.nightMode ? '#fff' : colorToCss(fmtColor)};text-align:{fmtAlign};font-family:{fmtFamily === 'Times' ? 'Georgia, Times, serif' : fmtFamily === 'Courier' ? 'Consolas, Courier, monospace' : 'Helvetica, Arial, sans-serif'};font-weight:{fmtBold ? 700 : 400};font-style:{fmtItalic ? 'italic' : 'normal'};text-decoration:{fmtUnderline ? 'underline' : 'none'}"
           spellcheck="true"
           disabled={busy}
           onkeydown={onKey}
-          onblur={() => void commit()}
         ></textarea>
         <div class="mt-1 flex w-max max-w-[60vw] items-center gap-3 whitespace-nowrap rounded bg-neutral-800 px-2 py-1 text-xs text-white shadow">
-          <span class="opacity-70">{editing.font} {editing.font_size.toFixed(1)}pt</span>
+          <span class="opacity-70">{fmtFamily} {fmtSize.toFixed(1)}pt</span>
           <span class="opacity-70">Ctrl+Enter applies, Esc cancels</span>
           {#if busy}<span>Applying…</span>{/if}
         </div>

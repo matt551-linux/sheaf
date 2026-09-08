@@ -28,6 +28,8 @@ const FPDF_ERR_PASSWORD: u32 = 4;
 const FPDF_ANNOT: u32 = 1;
 const FPDF_LCD_TEXT: u32 = 2;
 const FPDFBitmap_BGRA: u32 = 4;
+/// Non-zero winding fill rule for path objects (fpdf_edit.h FPDF_FILLMODE_*).
+pub(crate) const FPDF_FILLMODE_WINDING: u32 = 1;
 const FPDF_INCREMENTAL: u32 = 1;
 const FPDF_NO_INCREMENTAL: u32 = 2;
 const FLAT_NORMALDISPLAY: u32 = 0;

@@ -267,6 +267,8 @@ export interface TextBlock {
   baseline_x: number;
   baseline_y: number;
   line_count: number;
+  bold: boolean;
+  italic: boolean;
 }
 export interface BlockEdit {
   id: number;
@@ -275,6 +277,12 @@ export interface BlockEdit {
   dx?: number;
   dy?: number;
   font_size?: number | null;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  align?: "left" | "center" | "right" | null;
+  color?: Color | null;
+  font_family?: "Helvetica" | "Times" | "Courier" | null;
 }
 
 export interface PageObject {
