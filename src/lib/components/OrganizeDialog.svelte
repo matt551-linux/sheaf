@@ -111,13 +111,62 @@
     });
 
   // ---- drag to reorder ----
+  // Tauri's window-level dragDropEnabled (needed so dropping a PDF file onto
+  // the app opens it, see +page.svelte's onDragDropEvent) intercepts native
+  // HTML5 drag events on WebView2, so ondragstart/ondragover/ondrop never
+  // fire reliably here. Do reordering with plain pointer events instead,
+  // which stay entirely inside the page and are unaffected by that intercept.
   let dragFrom = $state(-1);
   let dropAt = $state(-1);
-  function onDrop(target: number) {
-    const moving = selected.has(dragFrom) ? sel : [dragFrom];
-    dragFrom = -1;
-    dropAt = -1;
-    if (!doc || moving.length === 0) return;
+  let dragging = $state(false);
+  let dragPos = $state({ x: 0, y: 0 });
+
+  function pointerDown(i: number, e: PointerEvent) {
+    if (e.button !== 0) return;
+    dragFrom = i;
+    dragging = false;
+    dragPos = { x: e.clientX, y: e.clientY };
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+
+    function elementAt(x: number, y: number): number {
+      const stack = document.elementsFromPoint(x, y);
+      for (const node of stack) {
+        const idxAttr = (node as HTMLElement).closest?.("[data-page-index]")?.getAttribute("data-page-index");
+        if (idxAttr != null) return parseInt(idxAttr, 10);
+      }
+      return -1;
+    }
+
+    function move(ev: PointerEvent) {
+      dragPos = { x: ev.clientX, y: ev.clientY };
+      if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 4) {
+        dragging = true;
+      }
+      if (dragging) {
+        const over = elementAt(ev.clientX, ev.clientY);
+        dropAt = over;
+      }
+    }
+    function up() {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const target = dropAt;
+      const wasDragging = dragging;
+      dragging = false;
+      dragFrom = -1;
+      dropAt = -1;
+      if (wasDragging && target >= 0) onDrop(target, i);
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function onDrop(target: number, from: number) {
+    const moving = selected.has(from) ? sel : [from];
+    if (!doc || moving.length === 0 || moving.includes(target)) return;
     // Dest is in post-removal coordinates per FPDF_MovePages semantics: it
     // takes the block's final start index directly.
     void run(async () => {
@@ -187,7 +236,7 @@
     <button class="{btn} {panel === 'crop' ? 'bg-neutral-200 dark:bg-neutral-700' : ''}" disabled={!hasSel || busy} onclick={() => (panel = panel === "crop" ? "none" : "crop")}>Crop…</button>
     <button class="{btn} {panel === 'stamp' ? 'bg-neutral-200 dark:bg-neutral-700' : ''}" disabled={busy} onclick={() => (panel = panel === "stamp" ? "none" : "stamp")}>Header / Watermark…</button>
     <span class="flex-1"></span>
-    <span class="mr-2 text-xs text-neutral-500">{hasSel ? `${sel.length} selected` : "Click to select; Ctrl/Shift for more; drag to reorder"}</span>
+    <span class="mr-2 text-xs text-neutral-500">{hasSel ? `${sel.length} selected` : "Click to select; Ctrl/Shift for more; drag a thumbnail to reorder"}</span>
     <button class={btn} onclick={onClose}>Done</button>
   </div>
 
@@ -232,28 +281,19 @@
       <div class="flex flex-wrap gap-3">
         {#each doc.pages as p (p.index)}
           <div
-            class="relative rounded border-2 p-1 transition-colors {selected.has(p.index) ? 'border-blue-500 bg-blue-50 dark:bg-blue-950' : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600'} {dropAt === p.index ? 'outline outline-2 outline-blue-400' : ''}"
+            data-page-index={p.index}
+            class="relative cursor-grab rounded border-2 p-1 transition-colors active:cursor-grabbing {selected.has(p.index) ? 'border-blue-500 bg-blue-50 dark:bg-blue-950' : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600'} {dropAt === p.index && dragFrom !== p.index ? 'outline outline-2 outline-blue-400' : ''} {dragging && dragFrom === p.index ? 'opacity-40' : ''}"
             role="button"
             tabindex="0"
             aria-pressed={selected.has(p.index)}
-            draggable="true"
-            onclick={(e) => toggle(p.index, e)}
+            onclick={(e) => {
+              if (dragging) return;
+              toggle(p.index, e);
+            }}
             onkeydown={(e) => {
               if (e.key === " " || e.key === "Enter") toggle(p.index, { shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey } as MouseEvent);
             }}
-            ondragstart={(e) => {
-              dragFrom = p.index;
-              e.dataTransfer!.effectAllowed = "move";
-            }}
-            ondragover={(e) => {
-              e.preventDefault();
-              dropAt = p.index;
-            }}
-            ondragleave={() => (dropAt = dropAt === p.index ? -1 : dropAt)}
-            ondrop={(e) => {
-              e.preventDefault();
-              onDrop(p.index);
-            }}
+            onpointerdown={(e) => pointerDown(p.index, e)}
           >
             {#if thumbs[p.index]}
               <img src={thumbs[p.index]} alt="Page {p.index + 1}" class="pointer-events-none max-h-44 shadow" draggable="false" />
@@ -269,5 +309,14 @@
 
   {#if busy}
     <div class="absolute inset-x-0 top-11 h-0.5 animate-pulse bg-blue-500"></div>
+  {/if}
+
+  {#if dragging && dragFrom >= 0}
+    <div
+      class="pointer-events-none fixed z-30 flex h-16 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded border-2 border-blue-500 bg-white/90 text-xs font-semibold text-blue-700 shadow-lg dark:bg-neutral-800/90 dark:text-blue-300"
+      style="left:{dragPos.x}px;top:{dragPos.y}px"
+    >
+      {(selected.has(dragFrom) ? sel.length : 1)} page{(selected.has(dragFrom) ? sel.length : 1) === 1 ? "" : "s"}
+    </div>
   {/if}
 </div>
