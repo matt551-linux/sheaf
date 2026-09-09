@@ -36,6 +36,15 @@ case "$target" in
 esac
 # SHEAF_SKIP_FRONTEND=1 reuses an existing build/ (the frontend is
 # architecture independent; esbuild crashes under QEMU emulation).
+case "$target" in
+  linux-*)
+    # linuxdeploy's bundled `strip` cannot handle the `.relr.dyn` relocation
+    # section emitted by modern glibc/webkitgtk builds and aborts on every
+    # bundled .so, which linuxdeploy then reports as a generic
+    # "failed to run linuxdeploy". NO_STRIP skips that step entirely.
+    export NO_STRIP=true
+    ;;
+esac
 if [ -n "${SHEAF_SKIP_FRONTEND:-}" ]; then
   [ -d build ] || { echo "SHEAF_SKIP_FRONTEND set but build/ is missing" >&2; exit 1; }
   pnpm tauri build --target "$rust_target" --config '{"build":{"beforeBuildCommand":""}}' "$@"
