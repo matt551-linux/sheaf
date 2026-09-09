@@ -270,6 +270,16 @@ export interface TextBlock {
   bold: boolean;
   italic: boolean;
 }
+export interface RunStyle {
+  start: number;
+  end: number;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  color?: Color | null;
+  font_family?: "Helvetica" | "Times" | "Courier" | null;
+}
+
 export interface BlockEdit {
   id: number;
   text: string;
@@ -283,6 +293,7 @@ export interface BlockEdit {
   align?: "left" | "center" | "right" | null;
   color?: Color | null;
   font_family?: "Helvetica" | "Times" | "Courier" | null;
+  runs?: RunStyle[] | null;
 }
 
 export interface PageObject {

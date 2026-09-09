@@ -16,7 +16,7 @@
 //! embedded fonts keep working as long as the replacement text only needs
 //! glyphs the font already has. When the font lacks a glyph PDFium reports
 //! width 0 and we fall back to Helvetica for the whole block.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,82 @@ pub struct BlockEdit {
     /// existing family when bold/italic are also unset.
     #[serde(default)]
     pub font_family: Option<String>,
+    /// Mixed-run formatting: character-range overrides layered on top of
+    /// the block-wide fields above. Ranges are char indices into `text`
+    /// (not bytes), half-open [start, end). Overlapping ranges are applied
+    /// in list order, later entries winning. Empty/absent means the whole
+    /// block uses the fields above uniformly (the phase-1 path).
+    #[serde(default)]
+    pub runs: Option<Vec<RunStyle>>,
+}
+
+/// A character-range formatting override for mixed-run (phase 2) editing.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunStyle {
+    /// Char index into the edited text, inclusive start.
+    pub start: u32,
+    /// Char index into the edited text, exclusive end.
+    pub end: u32,
+    #[serde(default)]
+    pub bold: Option<bool>,
+    #[serde(default)]
+    pub italic: Option<bool>,
+    #[serde(default)]
+    pub underline: Option<bool>,
+    #[serde(default)]
+    pub color: Option<Color>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+}
+
+/// Fully-resolved style for one segment of text: block-wide fields with any
+/// matching RunStyle overrides layered on top.
+#[derive(Debug, Clone)]
+struct ResolvedStyle {
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    color: Color,
+    family: String,
+}
+
+/// Resolve the style in effect at character offset `at`, applying every
+/// RunStyle whose range covers it on top of `base`, in list order.
+fn resolve_style(base: &ResolvedStyle, runs: &[RunStyle], at: usize) -> ResolvedStyle {
+    let mut s = base.clone();
+    for r in runs {
+        if (r.start as usize) <= at && at < (r.end as usize) {
+            if let Some(v) = r.bold {
+                s.bold = v;
+            }
+            if let Some(v) = r.italic {
+                s.italic = v;
+            }
+            if let Some(v) = r.underline {
+                s.underline = v;
+            }
+            if let Some(v) = r.color {
+                s.color = v;
+            }
+            if let Some(ref v) = r.font_family {
+                s.family = v.clone();
+            }
+        }
+    }
+    s
+}
+
+/// Standard-font handle for a resolved style, cached per (family, bold, italic).
+fn get_font(
+    cache: &mut HashMap<(String, bool, bool), FPDF_FONT>,
+    b: &dyn PdfiumLibraryBindings,
+    doc: FPDF_DOCUMENT,
+    style: &ResolvedStyle,
+) -> FPDF_FONT {
+    let key = (style.family.clone(), style.bold, style.italic);
+    *cache
+        .entry(key)
+        .or_insert_with(|| unsafe { b.FPDFText_LoadStandardFont(doc, standard_font_name(&style.family, style.bold, style.italic)) })
 }
 
 /// Map a family + weight/style to one of the PDF standard 14 font names.
@@ -335,10 +411,149 @@ impl EngineState {
         let want_italic = edit.italic.unwrap_or(orig_italic);
         drop(runs);
 
+        // Mixed-run (phase 2) editing: character-range overrides on top of
+        // the block-wide fields above. Kept as a separate path so the
+        // uniform case (the common one) is untouched and still prefers the
+        // original embedded font when no overrides are requested at all.
+        let mixed = edit.runs.as_ref().is_some_and(|r| !r.is_empty());
+
         self.checkpoint(id)?;
         let d = self.doc(id)?;
         let b = self.b.as_ref();
         let p = self.page(d, index)?;
+
+        // Delete old runs, highest index first so indices stay valid.
+        let mut idx = blk.objects.clone();
+        idx.sort_unstable_by(|a, b| b.cmp(a));
+        for i in idx {
+            let o = unsafe { b.FPDFPage_GetObject(p.page, i as i32) };
+            if !o.is_null() && unsafe { b.FPDFPage_RemoveObject(p.page, o) } != 0 {
+                unsafe { b.FPDFPageObj_Destroy(o) };
+            }
+        }
+
+        if mixed {
+            let base = ResolvedStyle { bold: want_bold, italic: want_italic, underline, color, family: want_family };
+            let run_styles = edit.runs.clone().unwrap_or_default();
+            let mut font_cache: HashMap<(String, bool, bool), FPDF_FONT> = HashMap::new();
+            let chars: Vec<char> = edit.text.chars().collect();
+            let styles: Vec<ResolvedStyle> = (0..chars.len()).map(|i| resolve_style(&base, &run_styles, i)).collect();
+            let font_at = |cache: &mut HashMap<(String, bool, bool), FPDF_FONT>, i: usize| get_font(cache, b, d.handle, &styles[i]);
+            let char_w = |cache: &mut HashMap<(String, bool, bool), FPDF_FONT>, i: usize| -> f32 {
+                let f = get_font(cache, b, d.handle, &styles[i]);
+                glyph_w(b, f, size, chars[i], true)
+            };
+
+            // Word-wrap over the original char sequence directly (not via
+            // split/rejoin) so line char ranges map straight back into
+            // `chars`/`styles` without losing the run-style alignment.
+            let mut line_ranges: Vec<(usize, usize)> = Vec::new();
+            let mut line_start = 0usize;
+            let mut line_w = 0f32;
+            let mut last_space: Option<usize> = None;
+            let mut i = 0usize;
+            while i < chars.len() {
+                if chars[i] == '\n' {
+                    line_ranges.push((line_start, i));
+                    line_start = i + 1;
+                    line_w = 0.0;
+                    last_space = None;
+                    i += 1;
+                    continue;
+                }
+                let w = char_w(&mut font_cache, i);
+                if line_w + w > width && i > line_start {
+                    if let Some(sp) = last_space {
+                        line_ranges.push((line_start, sp));
+                        line_start = sp + 1;
+                        line_w = (line_start..=i).map(|j| char_w(&mut font_cache, j)).sum();
+                        last_space = None;
+                        i += 1;
+                        continue;
+                    } else {
+                        // No break point on this line yet: hard-break here.
+                        line_ranges.push((line_start, i));
+                        line_start = i;
+                        line_w = 0.0;
+                        last_space = None;
+                        continue;
+                    }
+                }
+                if chars[i] == ' ' {
+                    last_space = Some(i);
+                }
+                line_w += w;
+                i += 1;
+            }
+            line_ranges.push((line_start, chars.len()));
+            while line_ranges.last().is_some_and(|&(s, e)| s >= e) && line_ranges.len() > 1 {
+                line_ranges.pop();
+            }
+
+            for (li, &(start, end)) in line_ranges.iter().enumerate() {
+                if start >= end {
+                    continue;
+                }
+                let line_total_w: f32 = (start..end).map(|j| char_w(&mut font_cache, j)).sum();
+                let line_x0 = match align {
+                    "center" => x + ((width - line_total_w) / 2.0).max(0.0),
+                    "right" => x + (width - line_total_w).max(0.0),
+                    _ => x,
+                };
+                let baseline_y = y0 - leading * li as f32;
+
+                // Group consecutive chars sharing (family, bold, italic,
+                // color, underline) into one text object per segment.
+                let mut seg_start = start;
+                let mut seg_x = line_x0;
+                while seg_start < end {
+                    let s0 = &styles[seg_start];
+                    let mut seg_end = seg_start + 1;
+                    while seg_end < end {
+                        let s1 = &styles[seg_end];
+                        if s1.family == s0.family && s1.bold == s0.bold && s1.italic == s0.italic && s1.color == s0.color && s1.underline == s0.underline {
+                            seg_end += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    let seg_text: String = chars[seg_start..seg_end].iter().collect();
+                    let seg_w: f32 = (seg_start..seg_end).map(|j| char_w(&mut font_cache, j)).sum();
+                    if !seg_text.trim().is_empty() || seg_text.contains(' ') {
+                        let font = font_at(&mut font_cache, seg_start);
+                        let obj = unsafe { b.FPDFPageObj_CreateTextObj(d.handle, font, size) };
+                        if obj.is_null() {
+                            return Err(pdf("could not create text object"));
+                        }
+                        let mut wide: Vec<u16> = seg_text.encode_utf16().collect();
+                        wide.push(0);
+                        unsafe {
+                            b.FPDFText_SetText(obj, wide.as_ptr());
+                            b.FPDFPageObj_SetFillColor(obj, s0.color.r as u32, s0.color.g as u32, s0.color.b as u32, 255);
+                            b.FPDFPageObj_Transform(obj, 1.0, 0.0, 0.0, 1.0, seg_x as f64, baseline_y as f64);
+                            b.FPDFPage_InsertObject(p.page, obj);
+                        }
+                        if s0.underline && seg_w > 0.0 {
+                            let thickness = (size * 0.06).max(0.5);
+                            let uy = baseline_y - size * 0.08;
+                            let rect = unsafe { b.FPDFPageObj_CreateNewRect(seg_x, uy, seg_w, thickness) };
+                            if !rect.is_null() {
+                                unsafe {
+                                    b.FPDFPageObj_SetFillColor(rect, s0.color.r as u32, s0.color.g as u32, s0.color.b as u32, 255);
+                                    b.FPDFPath_SetDrawMode(rect, FPDF_FILLMODE_WINDING as i32, 0);
+                                    b.FPDFPage_InsertObject(p.page, rect);
+                                }
+                            }
+                        }
+                    }
+                    seg_x += seg_w;
+                    seg_start = seg_end;
+                }
+            }
+            unsafe { b.FPDFPage_GenerateContent(p.page) };
+            drop(p);
+            return self.info(id);
+        }
 
         // Prefer the original font unless a style override forces a
         // standard font, or the original font cannot render the new text.
@@ -357,16 +572,6 @@ impl EngineState {
         let measure = |s: &str| -> f32 {
             s.chars().map(|c| glyph_w(b, font, size, c, fallback)).sum()
         };
-
-        // Delete old runs, highest index first so indices stay valid.
-        let mut idx = blk.objects.clone();
-        idx.sort_unstable_by(|a, b| b.cmp(a));
-        for i in idx {
-            let o = unsafe { b.FPDFPage_GetObject(p.page, i as i32) };
-            if !o.is_null() && unsafe { b.FPDFPage_RemoveObject(p.page, o) } != 0 {
-                unsafe { b.FPDFPageObj_Destroy(o) };
-            }
-        }
 
         // Word wrap. Explicit newlines start a new line; empty line = blank.
         let mut lines: Vec<String> = Vec::new();

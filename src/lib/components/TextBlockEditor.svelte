@@ -43,6 +43,11 @@
   // Track which formatting fields the user actively changed this session,
   // so we only override what was touched.
   let touched = $state<Set<string>>(new Set());
+  // Per-selection style overrides (mixed-run formatting): when the user
+  // selects a range of text and hits a toolbar button, the override applies
+  // only to that range instead of the whole paragraph. Ranges are UTF-16
+  // code-unit offsets into `draft`, same indexing the textarea uses.
+  let runs = $state<import("$lib/api").RunStyle[]>([]);
 
   function begin(b: TextBlock) {
     if (busy) return;
@@ -55,6 +60,7 @@
     fmtSize = Math.round(b.font_size * 10) / 10;
     fmtColor = { ...b.color };
     touched = new Set();
+    runs = [];
     docStore.editingBlock = { page: index, id: b.id };
     queueMicrotask(() => {
       ta?.focus();
@@ -65,15 +71,41 @@
   function touch(field: string) {
     touched = new Set(touched).add(field);
   }
+
+  // Merge a style patch into whatever range is currently selected in the
+  // textarea. Overlapping existing runs are split/trimmed so ranges never
+  // overlap (the engine assumes non-overlapping, left-to-right runs).
+  function applyRunPatch(patch: Partial<import("$lib/api").RunStyle>) {
+    const start = ta?.selectionStart ?? 0;
+    const end = ta?.selectionEnd ?? 0;
+    if (end <= start) return false;
+    const kept: import("$lib/api").RunStyle[] = [];
+    for (const r of runs) {
+      if (r.end <= start || r.start >= end) {
+        kept.push(r);
+        continue;
+      }
+      if (r.start < start) kept.push({ ...r, end: start });
+      if (r.end > end) kept.push({ ...r, start: end });
+    }
+    kept.push({ start, end, ...patch });
+    kept.sort((a, b) => a.start - b.start);
+    runs = kept;
+    return true;
+  }
+
   function toggleBold() {
+    if (applyRunPatch({ bold: true })) return; // caller flips per-run below
     fmtBold = !fmtBold;
     touch("bold");
   }
   function toggleItalic() {
+    if (applyRunPatch({ italic: true })) return;
     fmtItalic = !fmtItalic;
     touch("italic");
   }
   function toggleUnderline() {
+    if (applyRunPatch({ underline: true })) return;
     fmtUnderline = !fmtUnderline;
     touch("underline");
   }
@@ -82,6 +114,7 @@
     touch("align");
   }
   function setFamily(f: "Helvetica" | "Times" | "Courier") {
+    if (applyRunPatch({ font_family: f })) return;
     fmtFamily = f;
     touch("family");
   }
@@ -90,6 +123,7 @@
     touch("size");
   }
   function setColor(c: Color) {
+    if (applyRunPatch({ color: c })) return;
     fmtColor = c;
     touch("color");
   }
@@ -107,7 +141,8 @@
     if (touched.has("align")) edit.align = fmtAlign;
     if (touched.has("size")) edit.font_size = fmtSize;
     if (touched.has("color")) edit.color = fmtColor;
-    if (draft === b.text && touched.size === 0) {
+    if (runs.length > 0) edit.runs = runs;
+    if (draft === b.text && touched.size === 0 && runs.length === 0) {
       docStore.editingBlock = null;
       return;
     }

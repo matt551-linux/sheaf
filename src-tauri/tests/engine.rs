@@ -1027,6 +1027,7 @@ fn text_block_formatting() {
                 align: Some("center".into()),
                 color: Some(sheaf_lib::engine::Color { r: 200, g: 20, b: 20 }),
                 font_family: Some("Helvetica".into()),
+                runs: None,
             },
         )
         .unwrap();
@@ -1057,6 +1058,100 @@ fn text_block_formatting() {
     let cy = (png.height_px as f32 - (styled.rect.y + styled.rect.h / 2.0) * 2.0).max(0.0);
     let px = pixel(&png.png_base64, cx as u32, cy.min(png.height_px as f32 - 1.0) as u32);
     assert!(px[0] > 100, "expected some red ink near the styled text, got {px:?}");
+
+    engine.close(id).unwrap();
+}
+
+#[test]
+fn text_block_mixed_run_formatting() {
+    let engine = engine();
+    let info = engine.open(fixtures().join("sample.pdf"), None).unwrap();
+    let id = info.id;
+
+    engine
+        .add_text(
+            id,
+            0,
+            sheaf_lib::edit::TextSpec { text: "Plain words here".into(), x: 72.0, y: 500.0, font: "Helvetica".into(), font_size: 14.0, color: None },
+        )
+        .unwrap();
+    let blocks = engine.list_text_blocks(id, 0).unwrap();
+    let para = blocks.iter().find(|b| b.text.starts_with("Plain words")).expect("paragraph block");
+
+    // "one BOLD two" with only "BOLD" (chars 4..8) bold and red; the rest
+    // plain black. Verifies mixed-run overrides split into separate page
+    // objects with distinct styles rather than reformatting the whole block.
+    let text = "one BOLD two";
+    let info = engine
+        .set_text_block(
+            id,
+            0,
+            sheaf_lib::textedit::BlockEdit {
+                id: para.id,
+                text: text.into(),
+                width: Some(300.0),
+                dx: 0.0,
+                dy: 0.0,
+                font_size: None,
+                runs: Some(vec![sheaf_lib::textedit::RunStyle {
+                    start: 4,
+                    end: 8,
+                    bold: Some(true),
+                    italic: None,
+                    underline: None,
+                    color: Some(sheaf_lib::engine::Color { r: 220, g: 10, b: 10 }),
+                    font_family: None,
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(info.can_undo);
+
+    let objs = engine.list_page_objects(id, 0).unwrap();
+    let text_objs: Vec<_> = objs.iter().filter(|o| o.kind == "text").collect();
+    // Expect at least three separate text runs: "one ", "BOLD ", "two"
+    // (segments only split where style actually changes).
+    let bold_run = text_objs
+        .iter()
+        .find(|o| o.text.as_deref() == Some("BOLD "))
+        .expect("BOLD segment as its own text object");
+    assert!(bold_run.font.as_deref().unwrap_or("").to_lowercase().contains("bold"), "{:?}", bold_run.font);
+
+    let plain_run = text_objs
+        .iter()
+        .find(|o| o.text.as_deref().map(|t| t.contains("one")).unwrap_or(false))
+        .expect("plain prefix segment as its own text object");
+    assert!(!plain_run.font.as_deref().unwrap_or("").to_lowercase().contains("bold"), "{:?}", plain_run.font);
+
+    // Render and sample a red pixel under the bold word, and a black pixel
+    // under the plain prefix, confirming the two segments really differ.
+    let png = engine.render(id, 0, 2.0, 0).unwrap();
+    let bold_cx = ((bold_run.rect.x + bold_run.rect.w / 2.0) * 2.0) as u32;
+    let bold_cy = (png.height_px as f32 - (bold_run.rect.y + bold_run.rect.h / 2.0) * 2.0).max(0.0) as u32;
+    let bold_px = pixel(&png.png_base64, bold_cx, bold_cy.min(png.height_px - 1));
+    assert!(bold_px[0] > 100 && bold_px[1] < 100, "expected red ink under BOLD, got {bold_px:?}");
+
+    let plain_cy_top = (png.height_px as f32 - plain_run.rect.y * 2.0).max(0.0) as u32;
+    let plain_cy_bot = (png.height_px as f32 - (plain_run.rect.y + plain_run.rect.h) * 2.0).max(0.0) as u32;
+    let (plain_y_lo, plain_y_hi) = (plain_cy_top.min(plain_cy_bot), plain_cy_top.max(plain_cy_bot));
+    // Sample a small grid across the run's box and take the darkest pixel:
+    // exact glyph-ink coordinates are hard to predict from font metrics
+    // alone, so scan rather than guessing a single point.
+    let mut darkest = [255u8, 255, 255, 255];
+    for dx in 0..8 {
+        let x = ((plain_run.rect.x + plain_run.rect.w * dx as f32 / 7.0) * 2.0) as u32;
+        for y in plain_y_lo..=plain_y_hi.max(plain_y_lo + 1) {
+            let px = pixel(&png.png_base64, x.min(png.width_px - 1), y.min(png.height_px - 1));
+            if px[0] < darkest[0] {
+                darkest = px;
+            }
+        }
+    }
+    assert!(
+        darkest[0] < 100,
+        "expected dark (black) ink somewhere under the plain prefix, darkest found {darkest:?}"
+    );
 
     engine.close(id).unwrap();
 }
