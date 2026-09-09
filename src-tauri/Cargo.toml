@@ -1,6 +1,6 @@
 [package]
 name = "sheaf"
-version = "0.2.3"
+version = "0.2.4"
 description = "Sheaf: an open-source PDF reader and editor"
 authors = ["Brian Haywood"]
 license = "Apache-2.0"
